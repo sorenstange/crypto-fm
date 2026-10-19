@@ -1,9 +1,15 @@
 # Progress
 
-_Last updated: 2026-10-19, session 2 (M0 done). No jobs running._
+_Last updated: 2026-10-19, session 2 (M1 done). No jobs running._
 
 ## Current milestone
-**M0 (data acquisition) — DONE 2026-10-19.** Next: M1 (Phase 1 cleaning + Phase 2 features, plan.md §3–4) — not started; wait for the user's go-ahead.
+**M1 (cleaning + features) — DONE 2026-10-19.** Next: M2 (baselines, plan.md §11) or Phase 3 dataset/targets — wait for the user's go-ahead.
+
+M1 evidence:
+- `jobs/clean.sh` (job 29754839, 89 s): 641.3M raw rows → **638.5M kept (99.58%) in 3,688 segments**; dropped: listing warm-up 1.61M, identical runs 0.73M, short segments 0.38M (zero-volume runs are already covered by identical runs); breaks: 5,541 jumps > 10%, 105 long gaps; 0 fills needed. Checks all 0 (NaN, non-1-min steps, OHLC, taker > volume). Report: `data/processed/clean_report.csv`, `clean_summary.txt` (incl. survivorship: 81 included symbols no longer trade; 80 delisted/settling ones excluded only by history/liquidity rules).
+- `jobs/features.sh` (job 29754863): pooled seasonality from 296 symbols (factor 0.48…3.81), scalers lnsig (−6.585, 0.772), dvol (9.671, 1.723) → `data/stats/`. Features for all 371 symbols in 119 s wall (max 4 s/symbol), **0 non-finite**, 43.4 GB at float32 in RAM. Train moments: body std 0.98, ret std 1.02 (normalisation works); val/test drift in dvol (−0.4 / −1.1) and funding (lower).
+- `jobs/tests.sh` (job 29754864): **66 passed** — causality tests (future perturbation incl. funding, at segment boundaries / fills; synthetic and real BTC/LUNA with real stats), candle validity (synthetic + 4 real symbols), cleaning rules, encoding, bucket client.
+- Funding backfill from REST: ICPUSDT 1,433 rows (2021-05…2022-08), BNXUSDT 1,004 (2022-04…2023-01; incl. real 2h funding in Dec 2022), QTUMUSDT 28.
 
 M0 evidence (`data/raw/validation/summary.txt`, job 29754547):
 - Universe: **371 symbols** (`configs/universe.yaml`; COIN-underlying USDT perps, ≥365 active days, median daily quote volume ≥ $5M, delisted/settling included).
@@ -18,10 +24,10 @@ M−1 evidence:
 - `jobs/tests.sh` (job 29754141): 6/6 pytest pass (CPU resume is bitwise identical).
 - Chained resume test `cfm_resume_10191056` (jobs 29754139 → 29754140): one continuous W&B run `rudyhuy/crypto-fm/runs/334b5f4a`.
 
-## Next steps (M1, plan.md §3–4) — after user go-ahead
-1. Phase 1 cleaning as a **segment index** (no second data copy, plan.md §15.2): forward-fill ≤15-min gaps (none exist), split at long gaps / |r| > 0.10 jumps / >15 identical / >45 zero-volume candles, drop first 3 days after listing, min segment length; clip the 20 taker_buy > volume candles; cleaning report per symbol.
-2. Phase 2 features computed in RAM (vol.py, features.py), causality tests, `jobs/tests.sh`.
-3. Optional: backfill pre-relist funding for ICPUSDT (2021-05…2022-08) and BNXUSDT (2022-04…2023-01) and QTUMUSDT's first 9 days from REST `/fapi/v1/fundingRate` (has the history; the bucket and `*SETTLED` dirs don't).
+## Next steps (after user go-ahead)
+1. M2 baselines (plan.md §11): marginal over bins, EWMA-Gaussian, HAR-RV, GARCH(1,1) on validation; needs Phase 4 targets (binned returns at h ∈ {1,5,15,60} scaled by `scale` = σ_{t−1}·sqrt(season_t), realised variance) → write `targets.py` first, then `baselines.py`, `metrics.py` with day-block bootstrap.
+2. Phase 3 dataset (`splits.py`, `dataset.py`): in-RAM features per symbol (43 GB fp32 / 22 GB fp16; gpua100 nodes have 755 GB–1 TB RAM), √size symbol weights, patches P=15 clock-aligned, 128-patch context + 1440 warm-up, embargo 3 days, optional patch-anchored normalisation.
+3. Consider dropping the `filled` feature (always 0: there are no gaps ≤ 15 min in the data).
 
 ## Decisions made
 - Section 15 answers: recorded in plan.md §15.1 (universe top ~50–100 USDT perps from 2020; c = 0.05% + 0.02%; equal-weight portfolio; 15-min decisions).
@@ -67,6 +73,7 @@ M−1 evidence:
 - `src/cfm/utils/checkpoint.py` (atomic save, RNG capture/restore), `src/cfm/utils/run.py` (run info, `init_wandb`, `GracefulStop`) — reuse these in `cfm.train`
 - `src/cfm/smoke/gpu_check.py`, `src/cfm/smoke/resume_test.py`; `tests/test_resume.py`
 - `scripts/check_wandb_run.py`, `scripts/wandb_sync.sh` (offline fallback, currently unneeded)
+- Data (M1): `configs/data.yaml` (splits, clean/vol/feature params), `src/cfm/data/config.py`, `clean.py` (segment index + `load_clean`), `vol.py` (variance estimators, pooled seasonality, per-segment EWMA, adaptive floor), `features.py` (`build_features`, `fit-stats` / `check` CLI, `load_stats`); jobs `clean.sh`, `features.sh`; tests `test_clean.py`, `test_features.py`, `test_real_data.py`. Funding backfill: `python -m cfm.data.download --backfill-funding --symbols ...`.
 - Data (M0): `src/cfm/data/binance.py` (bucket listing/XML, HTTP retries, checksum, CSV parsing with header + ts-unit detection), `universe.py` (`scan` / `select`), `download.py` (per-symbol in-memory verified download → convert), `convert.py` (lossless int parquet, dedup, stale-tail trim, funding minute rounding), `load.py` (`read_klines`, `read_funding`), `validate.py`; jobs `universe.sh`, `download.sh` (array), `validate.sh`; tests `test_binance.py`, `test_convert.py` (30 pass)
 
 ## Gotchas / open issues
@@ -79,7 +86,7 @@ M−1 evidence:
 - resume_test margin was thin (SIGUSR2 at step 577/600); raise `--total-steps` if it is rerun.
 - `.venv` also contains the user's own unrelated packages (cwevals, opentelemetry, …); don't recreate the venv without asking.
 - A crashed W&B run `f193c8f3` from the first resume attempt is still in the project (user may delete it).
-- Home usage after M0: **20 GB of 30 GB by `du -sh ~`** (venv 9.9, data/raw 8.5 by du). The home NFS allocates ~30% more than file sizes (parquet 6.2 GiB apparent vs 8.3 GiB `du`); `getquota_zhome.sh` was still stale (11:04) — check which of the two the quota counts. ~10 GB left → budget checkpoints with the 1.3× overhead.
+- Home usage after M1: **quota 12.98 GB of 30 GB** (`getquota_zhome.sh`, 2026-10-19 ~14:00) while `du -sh ~` says 20 GB — the quota counts ~apparent size, not NFS block allocation. ~17 GB free. processed/ and stats/ are < 1 MB.
 - Data facts from validation: no funding settlement exists at 2026-06-24 04:00 for 4h-interval symbols (missing in the bucket *and* REST → a real skipped settlement, 189 symbols); 4 single-symbol long funding gaps (≥20 days, halts). 20 candles in 19 symbols have taker_buy_base > volume (upstream rounding). LIT zero-volume share 16%.
 - Raw store layout: `data/raw/parquet/<S>.parquet` (int-encoded; decode only via `cfm.data.load.read_klines`), `data/raw/funding/<S>.parquet`, `data/raw/manifest/<S>.csv` (per-symbol; needed for resume skip) + merged `manifest.csv`, `data/raw/universe/` (scan cache, 1d klines), `data/raw/validation/`.
 - `/dtu/blackhole` and `/work3` need HPC-support-created dirs; the user chose not to request them.

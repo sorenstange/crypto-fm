@@ -512,3 +512,12 @@ pnl_t = pos_t · r_{t→t+15}                         # log or simple return of 
 - Raw klines stored as lossless integers **without `quote_volume` / `taker_buy_quote`** (~15 B/candle vs ~45 B for float64 parquet). Exact daily quote volume stays available in `data/raw/universe/klines_1d.parquet`; per-minute dollar volume ≈ volume × price.
 - Budget: ~10.5 GB for raw klines, ~8.5 GB reserved (checkpoints 3, W&B/logs/eval 1, stats/indices 1, transient 1.5, safety 2).
 - **Phases 1–3 must not store a second full copy** of the data: cleaning produces a segment index (plus flags), and features are computed in RAM when the dataset is built (or stored compactly if that proves too slow).
+
+### 15.3 Splits and Phase 1–2 implementation decisions (2026-10-19)
+
+- **Splits (user choice):** train ≤ 2024-12-31 (363.5M cleaned minutes), val 2025-01-01 … 2025-09-30 (115.3M), test 2025-10-01 … 2026-09-30 (159.8M); 3-day embargo at the start of val and test. 296 of 371 symbols have train data. All in `configs/data.yaml`.
+- **Cleaning** additionally re-applies the listing warm-up after any gap ≥ 7 days (relistings) and clips `taker_buy_base` to `volume`.
+- **Seasonality** is pooled over all symbols' train data (each symbol normalised by its own train mean variance, winsorised at the 99.9th percentile) and uses means, not medians: per-candle variance medians are 0 for illiquid symbols, and 75 symbols have no train data.
+- **σ floor** is causal and adaptive, `σ ≥ max(0.2 · slow-EWMA σ (half-life 7 days), 1e-6)`, instead of a train-only 5th percentile, which does not exist for symbols listed after the train period.
+- **Normaliser** for candle t is `σ_{t−1} · sqrt(season_t)` (deseasonalised EWMA re-seasonalised with the calendar factor known in advance); use the same scale for return targets in Phase 4.
+- Patch-anchored normalisation (§4.4) is left to the Phase 3 dataset.
