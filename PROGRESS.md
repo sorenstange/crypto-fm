@@ -1,9 +1,21 @@
 # Progress
 
-_Last updated: 2026-10-19, session 2 (M2 done). No jobs running._
+_Last updated: 2026-10-19, end of session 2. M3 in progress (code written, not yet trained). One job pending: smoke test 29757820 (gpul40s)._
 
 ## Current milestone
-**M2 (baselines) — DONE 2026-10-19.** Next: M3 backbone v1 (Phase 3 dataset + Phase 5 model + Phase 7 training) — wait for the user's go-ahead.
+**M3 (backbone v1) — IN PROGRESS.** All code is written, committed and unit-tested (CPU); the GPU smoke test has **not run yet** (queued). No real training run has been submitted.
+
+Session 2 summary: M0 (data), M1 (cleaning + features) and M2 (baselines) were completed and accepted; M3 code was written.
+
+M3 status:
+- Written (commits a6c5f6f, caebe51, 17d682d): `configs/backbone.yaml`, `src/cfm/data/dataset.py`, `src/cfm/model/{blocks,backbone}.py`, `src/cfm/losses.py`, `src/cfm/eval/model_eval.py`, `src/cfm/train.py`, `jobs/train.sh`, `tests/test_model.py` (6 pass on the login node: v1 has 4.5–6M params, model causal, initial CE ≈ ln 66 and vol head = EWMA at init, losses match `eval.metrics`, every val point scored exactly once, √size symbol weights, sampler state round-trips).
+- Smoke-test attempts (5 symbols BTC/ETH/SOL/DOGE/HYPER, 600 steps, run dir `data/runs/smoke_m3`, W&B group `smoke`):
+  - 29755217 (gpua100): ImportError `seed_all` → moved it to `utils/checkpoint.py` (caebe51).
+  - 29755221 (gpua100): got through the data build (**776,218 patches from 5 symbols in 6 s; 647,672 train window starts; 1,841 val windows**, A100 80GB), then `PermissionError: '/smoke_m3'` — `$RUNS_DIR` in an inline `bsub "..."` command string expanded to empty → pass an absolute path instead.
+  - 29755223 (gpua100): killed while pending (~2,000 jobs queued on gpua100).
+  - 29757779 (gpul40s, `-n 8`): killed while pending (no free L40S slot with 8 cores).
+  - **29757820 (gpul40s, `-n 4`, 16 GB/core, 1 h): PENDING at session end** (waiting for a GPU). Log: `logs/29757820.out` / `.err`.
+- Not yet exercised on a GPU: training loop, torch.compile, periodic eval (step 500), final paired evaluation with bootstrap, W&B logging from `cfm.train`.
 
 M2 evidence (`data/eval/baselines/summary.md`, job 29755134, 286 s; W&B `rudyhuy/crypto-fm/runs/2d668994`, group `baselines`):
 - Prediction points = patch ends (:14/:29/:44/:59) after the 1440-min warm-up: train 24.0M, val 7.55M (val = 2025-01-04 … 2025-09-30 after the 3-day embargo). Test never touched.
@@ -32,9 +44,14 @@ M−1 evidence:
 - `jobs/tests.sh` (job 29754141): 6/6 pytest pass (CPU resume is bitwise identical).
 - Chained resume test `cfm_resume_10191056` (jobs 29754139 → 29754140): one continuous W&B run `rudyhuy/crypto-fm/runs/334b5f4a`.
 
-## Next steps (after user go-ahead)
-1. M3 backbone v1: Phase 3 dataset (`dataset.py`: in-RAM features per symbol — 43 GB fp32 / 22 GB fp16, gpua100 nodes have 755 GB–1 TB RAM; √size symbol weights; P=15 clock-aligned patches, 128-patch context + 1440 warm-up; targets from `targets.py` at every patch end), Phase 5 model (`model/blocks.py`, `backbone.py`, `heads.py`), Phase 4 losses (CE over 66 bins, QLIKE, z-loss), Phase 7 `cfm.train` reusing `utils/checkpoint.py` + `utils/run.py`; evaluate with `cfm.eval.metrics` against `data/stats/baselines.json` on the same val prediction points.
-2. Consider dropping the `filled` feature (always 0: there are no gaps ≤ 15 min in the data).
+## Next steps (M3)
+1. Check smoke job **29757820**: `bjobs -a 29757820`; `grep -E "^\[(dataset|train|eval|final)\]" logs/29757820.out`; errors in `logs/29757820.err`. Expect: initial CE ≈ 4.19 per horizon, falling train loss, `[eval] step 500 ...`, a `[final]` table, `COMPLETED` in `data/runs/smoke_m3/`. If it never started, resubmit (absolute run dir!):
+   `bsub -q gpul40s -J cfm_smoke_m3 -n 4 -R "span[hosts=1]" -R "rusage[mem=16GB]" -gpu "num=1:mode=exclusive_process" -W 1:00 -o logs/%J.out -e logs/%J.err "set -euo pipefail; source jobs/common.sh; python -m cfm.train --run-dir $PWD/data/runs/smoke_m3 --symbols BTCUSDT ETHUSDT SOLUSDT DOGEUSDT HYPERUSDT --total-steps 600 --name smoke_m3 --group smoke"`
+2. Fix whatever the smoke test exposes; then delete `data/runs/smoke_m3` (and the W&B smoke runs if the user wants).
+3. Before the full run, check from the smoke log: steps/s and GPU memory (`train/patches_per_s`, `train/gpu_mem_gb` in W&B) → estimate wall time for 20k steps and whether `-W 8:00` suffices (else `jobs/submit_chain.sh 2 jobs/train.sh cfm_bb_v1`); full-data RAM for the build (16 GB of fp16 features + copies; job requests 64 GB).
+4. Full run: `bsub -J cfm_bb_v1 < jobs/train.sh` (gpul40s, 371 symbols, 20k steps, eval every 500 on 2,048 val windows, early stop after 10 evals without improvement).
+5. M3 acceptance from `data/runs/cfm_bb_v1/eval/val_vs_baselines.csv` + `val_summary.json`: initial CE ≈ ln 66 (`init/ce_h*` in W&B), CE gain over the train marginal > 0 with day-bootstrap CI excluding 0 for each horizon, QLIKE gain over EWMA > 0 with CI excluding 0. Also report rank ICs and QLIKE vs HAR (the M5 bar). Then stop and report.
+6. Later: consider dropping the `filled` feature (always 0); `heads.py` from the plan layout is folded into `model/backbone.py` (ret_head, vol_head).
 
 ## Decisions made
 - Section 15 answers: recorded in plan.md §15.1 (universe top ~50–100 USDT perps from 2020; c = 0.05% + 0.02%; equal-weight portfolio; 15-min decisions).
@@ -43,6 +60,8 @@ M−1 evidence:
 - **W&B:** default entity of the logged-in account (`rudyhuy`, `WANDB_ENTITY` unset), project `crypto-fm`. Key in `~/.netrc`. Mode auto-detected in common.sh. Run ID stored in `<run_dir>/wandb_id.txt`; resumed jobs reuse it. All metrics logged against `trainer/step` (not W&B's internal step).
 - **torch 2.14.1+cu130** (smaller than cu126 — chosen for space). No V100 support → don't use `gpuv100`; use `gpua100` / `gpul40s` / `gpuh100`. No CUDA module is loaded (wheel bundles the runtime).
 - Queues: **GPU `gpul40s`** (user decision 2026-10-19: gpua100 had ~2,000 pending jobs; `gpuh100` is closed to this account — "User cannot use the queue"), 4 cores + 16 GB/core per GPU job (8-core requests did not fit on free L40S slots); CPU `hpc`; no LSF email.
+- **Data/split decisions (session 2, details in plan.md §15.2–15.3):** maximise candles within the quota; universe floor $5M median daily quote volume; quote-volume columns dropped; splits train ≤ 2024-12-31 / val 2025-01…09 / test 2025-10…2026-09, 3-day embargo; no second data copy (segment index + in-RAM features); pooled seasonality; causal adaptive σ floor; scale σ_{t-1}·sqrt(season_t).
+- **M3 design decisions (session 2):** features live on the GPU as fp16 (train + val ≈ 16 GB; test never loaded); the vol head predicts the log-ratio to the EWMA forecast (zero-init → starts at EWMA, scale-free); validation points are scored once each with ≥ 64 patches of context and compared to the baselines on identical points; best checkpoint by summed val loss (Σ CE + w_vol Σ QLIKE); heads live in `model/backbone.py` (no separate `heads.py`).
 - Session workflow (CLAUDE.md): read PROGRESS.md + plan.md at session start; update PROGRESS.md and commit before ending.
 - Commits go directly on `main`. Remote `origin` = github.com/sorenstange/crypto-fm; session-1 commits are **not pushed** (push only when the user asks).
 - Chaining: `jobs/submit_chain.sh N script name` chains by **job ID** (`-w done(id)`); all jobs share the job name → same run dir `$RUNS_DIR/<name>`. `DEP=ended` continues after crashes.
@@ -72,15 +91,16 @@ M−1 evidence:
 - Pilot bytes/candle (int store, full history): BTC 14.4, ETH 13.2, LUNA 11.8, HYPER 9.3; full universe 10.3.
 
 ## Running / pending jobs
-- None (`bjobs` empty at session end, 2026-10-19).
+- **29757820** `cfm_smoke_m3` on `gpul40s` — PENDING at session end (2026-10-19), 1 h walltime; writes `logs/29757820.out`, `data/runs/smoke_m3/`, W&B run `smoke_m3` (group `smoke`). Nothing else queued.
 
 ## Code map (what exists)
 - `env/setup_env.sh`, `env/modules.sh`, `env/requirements.txt` (+ `requirements.lock.txt`)
 - `jobs/common.sh` (paths, venv, W&B env, `cfm_run`, `cfm_net_report`), `jobs/test_gpu.sh`, `jobs/check_net.sh`, `jobs/tests.sh`, `jobs/resume_test.sh`, `jobs/submit_chain.sh`
-- `src/cfm/utils/checkpoint.py` (atomic save, RNG capture/restore), `src/cfm/utils/run.py` (run info, `init_wandb`, `GracefulStop`) — reuse these in `cfm.train`
+- `src/cfm/utils/checkpoint.py` (atomic save, RNG capture/restore, `seed_all`), `src/cfm/utils/run.py` (run info, `init_wandb`, `GracefulStop`) — reuse these in `cfm.train`
 - `src/cfm/smoke/gpu_check.py`, `src/cfm/smoke/resume_test.py`; `tests/test_resume.py`
 - `scripts/check_wandb_run.py`, `scripts/wandb_sync.sh` (offline fallback, currently unneeded)
 - Eval (M2): `configs/data.yaml` `targets:` section; `src/cfm/data/splits.py` (`split_codes` with embargo, `prediction_points`), `targets.py` (z_h with scale σ_t·sqrt(Σ season), RV_h, 66 bins), `src/cfm/eval/metrics.py` (CE, binned CRPS, randomized PIT, rank IC, QLIKE, log-MAE, `day_bootstrap`), `baselines.py` (marginal, Gaussian, EWMA, log-HAR, GARCH(1,1) with stable h-step sums), `evaluate.py` (`python -m cfm.eval.evaluate baselines`); job `baselines.sh`; tests `test_targets_baselines.py`. Fitted params: `data/stats/baselines.json`.
+- Backbone (M3, untrained): `configs/backbone.yaml` (model d256/L6/H4/SwiGLU 768/dropout 0.1; context 128 patches, warm-up 96; AdamW 1e-3 WSD 20k steps, batch 256, bf16, compile; eval every 500 on 2,048 val windows; early stop 10). `src/cfm/data/dataset.py` (`build_patch_data`: per-symbol features + targets cut into clock-aligned 15-candle patches, only data ≤ val_end (+1 day for targets) — test never loaded, asserted; `train_starts`, `start_weights` (√size), `WindowSampler` (numpy RNG, checkpointable), `eval_windows` (each val point once, ≥ 64 patches context)). `src/cfm/model/blocks.py` (RMSNorm, RoPE, QK-norm attention via SDPA, SwiGLU), `backbone.py` (patch embed → blocks → 4×66 return logits + 2 vol log-ratios to EWMA; zero-init vol head; no decay on norms/patch embed). `src/cfm/losses.py` (CE + z-loss, QLIKE as expm1(a)−a). `src/cfm/eval/model_eval.py` (`GPUData`, `predict_points`, `compare`: model vs marginal / EWMA / HAR on identical points, day bootstrap, rank IC). `src/cfm/train.py` (`python -m cfm.train --run-dir ...`; `--symbols`, `--total-steps`, `--max-minutes`, `--no-compile`); checkpoints `last.pt` + `best.pt` in `<run>/checkpoints/`, final eval in `<run>/eval/`. Job `jobs/train.sh` (gpul40s, run name = job name).
 - Data (M1): `configs/data.yaml` (splits, clean/vol/feature params), `src/cfm/data/config.py`, `clean.py` (segment index + `load_clean`), `vol.py` (variance estimators, pooled seasonality, per-segment EWMA, adaptive floor), `features.py` (`build_features`, `fit-stats` / `check` CLI, `load_stats`); jobs `clean.sh`, `features.sh`; tests `test_clean.py`, `test_features.py`, `test_real_data.py`. Funding backfill: `python -m cfm.data.download --backfill-funding --symbols ...`.
 - Data (M0): `src/cfm/data/binance.py` (bucket listing/XML, HTTP retries, checksum, CSV parsing with header + ts-unit detection), `universe.py` (`scan` / `select`), `download.py` (per-symbol in-memory verified download → convert), `convert.py` (lossless int parquet, dedup, stale-tail trim, funding minute rounding), `load.py` (`read_klines`, `read_funding`), `validate.py`; jobs `universe.sh`, `download.sh` (array), `validate.sh`; tests `test_binance.py`, `test_convert.py` (30 pass)
 
@@ -98,12 +118,16 @@ M−1 evidence:
 - Home usage after M1: **quota 12.98 GB of 30 GB** (`getquota_zhome.sh`, 2026-10-19 ~14:00) while `du -sh ~` says 20 GB — the quota counts ~apparent size, not NFS block allocation. ~17 GB free. processed/ and stats/ are < 1 MB.
 - Data facts from validation: no funding settlement exists at 2026-06-24 04:00 for 4h-interval symbols (missing in the bucket *and* REST → a real skipped settlement, 189 symbols); 4 single-symbol long funding gaps (≥20 days, halts). 20 candles in 19 symbols have taker_buy_base > volume (upstream rounding). LIT zero-volume share 16%.
 - Raw store layout: `data/raw/parquet/<S>.parquet` (int-encoded; decode only via `cfm.data.load.read_klines`), `data/raw/funding/<S>.parquet`, `data/raw/manifest/<S>.csv` (per-symbol; needed for resume skip) + merged `manifest.csv`, `data/raw/universe/` (scan cache, 1d klines), `data/raw/validation/`.
+- **Inline `bsub "..."` commands: `$RUNS_DIR` / `$DATA_ROOT` expand to empty** even after `source jobs/common.sh` in the same string → use absolute paths (expanded at submission) or a job script.
+- GPU queue load 2026-10-19: gpua100 ~2,000 pending / 133 running; gpul40s ~150 pending / 80 running; **gpuh100: "User cannot use the queue"**. Free L40S slots often lack 8 cores → GPU jobs request `-n 4`.
+- Smoke-test data build saw an **A100 80GB** node; gpua100 also has 40 GB nodes — on L40S (48 GB) the ~16 GB of fp16 features + model fit comfortably.
+- GPU node RAM: gpua100 hosts 755 GB–1 TB (`lshosts`); L40S node RAM not yet checked (job requests 64 GB).
 - `/dtu/blackhole` and `/work3` need HPC-support-created dirs; the user chose not to request them.
 
 ## How to resume work
 ```bash
 cd ~/crypto-fm
-bjobs -a                       # anything still running?
+bjobs -a                       # smoke job 29757820 finished? (see Next steps 1)
 bsub < jobs/tests.sh           # sanity: unit tests
 source jobs/common.sh          # login-node env for light work (wandb API, etc.)
 ```
