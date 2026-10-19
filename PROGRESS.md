@@ -1,9 +1,9 @@
 # Progress
 
-_Last updated: 2026-10-19, end of session 2. M3 in progress: code written, GPU smoke test PASSED (job 29757820); full run not submitted. No jobs running. 16 commits not pushed (no GitHub credentials on the cluster yet)._
+_Last updated: 2026-10-19, session 3. M3 in progress: smoke test PASSED; full run **29758436 (`cfm_bb_v1`) running** on gpul40s since 16:30. Commits not pushed (no GitHub credentials on the cluster yet)._
 
 ## Current milestone
-**M3 (backbone v1) — IN PROGRESS.** All code is written, committed, unit-tested and smoke-tested on an L40S. No full training run has been submitted yet.
+**M3 (backbone v1) — IN PROGRESS.** All code is written, committed, unit-tested and smoke-tested on an L40S. Full run `cfm_bb_v1` (job 29758436) submitted in session 3.
 
 Session 2 summary: M0 (data), M1 (cleaning + features) and M2 (baselines) were completed and accepted; M3 code was written.
 
@@ -16,6 +16,7 @@ M3 status:
   - 29757779 (gpul40s, `-n 8`): killed while pending (no free L40S slot with 8 cores).
   - **29757820 (gpul40s, `-n 4`, 16 GB/core): PASSED** (167 s, L40S 46 GB, 3.1 GB host RAM; W&B `rudyhuy/crypto-fm/runs/afa7d897`; `data/runs/smoke_m3/` with COMPLETED, best/last checkpoints, eval/). Whole pipeline works: data build, compile, training, eval at 500/600, final paired eval with bootstrap, W&B.
 - Smoke numbers (5 symbols, 600 steps, 117,833 val points — **not the M3 result**): initial CE 4.18–4.26 (ln 66 = 4.19), initial QLIKE 0.45 (= EWMA). Final: CE gain over marginal h1 0.189 [0.176, 0.201], h5 0.179, h15 0.173, h60 0.141 (all CIs > 0); rank IC pooled h1 0.097 / h5 0.055 / h15 0.046 / h60 0.037, cross-sectional 0.074 / 0.038 / 0.039 / 0.023; QLIKE h15 0.274 vs EWMA 0.672 vs HAR 0.280 (≈ HAR, CI spans 0), h60 0.277 vs HAR 0.267. Speed 1.52M patches/s = 46 steps/s at batch 256×128 (20k steps ≈ 8 min of training), GPU memory 2.9 GB for training.
+- Session 3: `jobs/tests.sh` (job 29758411) **82 passed**; target alignment in `dataset.py` re-read (features up to the patch's last minute, targets from that minute on). The CE gain is plausibly mostly volatility information: z is scaled by EWMA σ (a poor vol forecast, QLIKE 0.67 vs HAR 0.28 on these symbols) and a Gaussian's CE excess from a wrong scale ≈ QLIKE/2 ≈ 0.2 nats. `jobs/train.sh` walltime 8 h → 2 h (38325ec); `data/runs/smoke_m3` deleted.
 - **The CE gains / h1 IC look large for this SNR → run leakage/attribution diagnostics before trusting M3 numbers** (Next steps 1).
 
 M2 evidence (`data/eval/baselines/summary.md`, job 29755134, 286 s; W&B `rudyhuy/crypto-fm/runs/2d668994`, group `baselines`):
@@ -47,9 +48,9 @@ M−1 evidence:
 
 ## Next steps (M3)
 1. **Diagnostics before/with the full run** (the smoke gains look too good to accept unchecked): (a) a "HAR-scaled marginal" return baseline — marginal shape rescaled by sqrt(HAR/EWMA variance) — to separate the volatility-scale part of the CE gain; (b) the IC of a trivial 1-minute reversal signal (−last return) to see how much of the h1 IC is bid-ask bounce; (c) a shuffled-target control (permute targets across windows → gain must vanish); (d) a one-patch feature-lag control (input ends one patch before the prediction point → gain should shrink, not collapse); also check the share of the zero-return bin per symbol (tick-size discreteness on low-priced coins).
-2. Full run: `bsub -J cfm_bb_v1 < jobs/train.sh` (gpul40s, 371 symbols, 20k steps; data build ~16 GB fp16 features, job requests 64 GB RAM; 8 h walltime is ample).
+2. Full run: **submitted as 29758436** (`bsub < jobs/train.sh`; gpul40s, 371 symbols, 20k steps, 2 h walltime; data build ~16 GB fp16 features, job requests 64 GB RAM). Check `bjobs -a 29758436`, `grep -E "^\[" logs/29758436.out`, `data/runs/cfm_bb_v1/`.
 3. M3 acceptance from `data/runs/cfm_bb_v1/eval/val_vs_baselines.csv` + `val_summary.json`: initial CE ≈ ln 66, CE gain over the marginal > 0 with CI excluding 0 for each horizon, QLIKE gain over EWMA > 0 with CI excluding 0 — plus the diagnostics from step 1. Report rank ICs and QLIKE vs HAR (the M5 bar). Then stop and report.
-4. Clean-up: delete `data/runs/smoke_m3` (~120 MB of checkpoints) once the full run works; W&B smoke runs `afa7d897` (and the failed attempts) can be deleted if the user wants.
+4. Clean-up: `data/runs/smoke_m3` deleted (session 3); W&B smoke runs `afa7d897` (and the failed attempts) can be deleted if the user wants.
 5. Push: needs GitHub credentials on the cluster (no gh, no SSH key, no credential helper) — user to choose a PAT push via `! git push https://sorenstange@github.com/...` or an SSH key for the cluster.
 6. Later: consider dropping the `filled` feature (always 0).
 
@@ -91,7 +92,7 @@ M−1 evidence:
 - Pilot bytes/candle (int store, full history): BTC 14.4, ETH 13.2, LUNA 11.8, HYPER 9.3; full universe 10.3.
 
 ## Running / pending jobs
-- None. (Smoke test 29757820 finished DONE; nothing queued.)
+- **29758436** `cfm_bb_v1` on `gpul40s` (2 h walltime), started 2026-10-19 16:30 → `data/runs/cfm_bb_v1/`, W&B group `backbone`.
 
 ## Code map (what exists)
 - `env/setup_env.sh`, `env/modules.sh`, `env/requirements.txt` (+ `requirements.lock.txt`)
@@ -123,6 +124,7 @@ M−1 evidence:
 - Smoke-test data build saw an **A100 80GB** node; gpua100 also has 40 GB nodes — on L40S (48 GB) the ~16 GB of fp16 features + model fit comfortably.
 - GPU node RAM: gpua100 hosts 755 GB–1 TB (`lshosts`); L40S node RAM not yet checked (job requests 64 GB).
 - **`git push` fails on the cluster:** no GitHub credentials (HTTPS prompts for a username and cannot; no `gh`, no `~/.ssh` key). origin = https://github.com/sorenstange/crypto-fm.git.
+- **One Claude session at a time:** in session 3 a leftover background session (from session 2, under the `claude daemon`) committed to PROGRESS.md concurrently. Check `ps -u $USER -f | grep claude` / ListAgents at session start; close stray ones.
 - `/dtu/blackhole` and `/work3` need HPC-support-created dirs; the user chose not to request them.
 
 ## How to resume work
