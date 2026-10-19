@@ -1,9 +1,17 @@
 # Progress
 
-_Last updated: 2026-10-19, session 2 (M1 done). No jobs running._
+_Last updated: 2026-10-19, session 2 (M2 done). No jobs running._
 
 ## Current milestone
-**M1 (cleaning + features) — DONE 2026-10-19.** Next: M2 (baselines, plan.md §11) or Phase 3 dataset/targets — wait for the user's go-ahead.
+**M2 (baselines) — DONE 2026-10-19.** Next: M3 backbone v1 (Phase 3 dataset + Phase 5 model + Phase 7 training) — wait for the user's go-ahead.
+
+M2 evidence (`data/eval/baselines/summary.md`, job 29755134, 286 s; W&B `rudyhuy/crypto-fm/runs/2d668994`, group `baselines`):
+- Prediction points = patch ends (:14/:29/:44/:59) after the 1440-min warm-up: train 24.0M, val 7.55M (val = 2025-01-04 … 2025-09-30 after the 3-day embargo). Test never touched.
+- **Returns (CE in nats over 66 bins; ln 66 = 4.19):** the train marginal is the best baseline — h1 3.347, h5 3.393, h15 3.362, h60 3.348. Gaussian N(0,1) in z-space is 0.06–0.10 nats worse (tails), calibrated Gaussian 0.04–0.08 worse; CRPS nearly equal (marginal ≈ 0.61–0.64). Marginal PIT max decile deviation ≤ 0.023 (well calibrated). Rank IC n/a (constant forecasts).
+- **Volatility (QLIKE, deseasonalised RV, all symbols):** EWMA h15 0.493 / h60 0.465; **HAR h15 0.280 / h60 0.252** (gain 0.21, CI 0.20–0.22); on the 273 GARCH-fitted symbols GARCH 0.335 / 0.335 sits between EWMA (0.419 / 0.393) and HAR (0.268 / 0.241). Train-calibrated EWMA is slightly worse than raw EWMA on val.
+- Bars for later milestones: **M3** beat marginal CE (≈3.35–3.39) and EWMA QLIKE with CI excluding 0; **M5** beat HAR QLIKE (0.280 / 0.252).
+- HAR's gain over EWMA is largest for low-liquidity symbols (0.33) and high-vol regimes (0.67).
+- `jobs/tests.sh` (job 29755158): **76 passed**.
 
 M1 evidence:
 - `jobs/clean.sh` (job 29754839, 89 s): 641.3M raw rows → **638.5M kept (99.58%) in 3,688 segments**; dropped: listing warm-up 1.61M, identical runs 0.73M, short segments 0.38M (zero-volume runs are already covered by identical runs); breaks: 5,541 jumps > 10%, 105 long gaps; 0 fills needed. Checks all 0 (NaN, non-1-min steps, OHLC, taker > volume). Report: `data/processed/clean_report.csv`, `clean_summary.txt` (incl. survivorship: 81 included symbols no longer trade; 80 delisted/settling ones excluded only by history/liquidity rules).
@@ -25,9 +33,8 @@ M−1 evidence:
 - Chained resume test `cfm_resume_10191056` (jobs 29754139 → 29754140): one continuous W&B run `rudyhuy/crypto-fm/runs/334b5f4a`.
 
 ## Next steps (after user go-ahead)
-1. M2 baselines (plan.md §11): marginal over bins, EWMA-Gaussian, HAR-RV, GARCH(1,1) on validation; needs Phase 4 targets (binned returns at h ∈ {1,5,15,60} scaled by `scale` = σ_{t−1}·sqrt(season_t), realised variance) → write `targets.py` first, then `baselines.py`, `metrics.py` with day-block bootstrap.
-2. Phase 3 dataset (`splits.py`, `dataset.py`): in-RAM features per symbol (43 GB fp32 / 22 GB fp16; gpua100 nodes have 755 GB–1 TB RAM), √size symbol weights, patches P=15 clock-aligned, 128-patch context + 1440 warm-up, embargo 3 days, optional patch-anchored normalisation.
-3. Consider dropping the `filled` feature (always 0: there are no gaps ≤ 15 min in the data).
+1. M3 backbone v1: Phase 3 dataset (`dataset.py`: in-RAM features per symbol — 43 GB fp32 / 22 GB fp16, gpua100 nodes have 755 GB–1 TB RAM; √size symbol weights; P=15 clock-aligned patches, 128-patch context + 1440 warm-up; targets from `targets.py` at every patch end), Phase 5 model (`model/blocks.py`, `backbone.py`, `heads.py`), Phase 4 losses (CE over 66 bins, QLIKE, z-loss), Phase 7 `cfm.train` reusing `utils/checkpoint.py` + `utils/run.py`; evaluate with `cfm.eval.metrics` against `data/stats/baselines.json` on the same val prediction points.
+2. Consider dropping the `filled` feature (always 0: there are no gaps ≤ 15 min in the data).
 
 ## Decisions made
 - Section 15 answers: recorded in plan.md §15.1 (universe top ~50–100 USDT perps from 2020; c = 0.05% + 0.02%; equal-weight portfolio; 15-min decisions).
@@ -73,6 +80,7 @@ M−1 evidence:
 - `src/cfm/utils/checkpoint.py` (atomic save, RNG capture/restore), `src/cfm/utils/run.py` (run info, `init_wandb`, `GracefulStop`) — reuse these in `cfm.train`
 - `src/cfm/smoke/gpu_check.py`, `src/cfm/smoke/resume_test.py`; `tests/test_resume.py`
 - `scripts/check_wandb_run.py`, `scripts/wandb_sync.sh` (offline fallback, currently unneeded)
+- Eval (M2): `configs/data.yaml` `targets:` section; `src/cfm/data/splits.py` (`split_codes` with embargo, `prediction_points`), `targets.py` (z_h with scale σ_t·sqrt(Σ season), RV_h, 66 bins), `src/cfm/eval/metrics.py` (CE, binned CRPS, randomized PIT, rank IC, QLIKE, log-MAE, `day_bootstrap`), `baselines.py` (marginal, Gaussian, EWMA, log-HAR, GARCH(1,1) with stable h-step sums), `evaluate.py` (`python -m cfm.eval.evaluate baselines`); job `baselines.sh`; tests `test_targets_baselines.py`. Fitted params: `data/stats/baselines.json`.
 - Data (M1): `configs/data.yaml` (splits, clean/vol/feature params), `src/cfm/data/config.py`, `clean.py` (segment index + `load_clean`), `vol.py` (variance estimators, pooled seasonality, per-segment EWMA, adaptive floor), `features.py` (`build_features`, `fit-stats` / `check` CLI, `load_stats`); jobs `clean.sh`, `features.sh`; tests `test_clean.py`, `test_features.py`, `test_real_data.py`. Funding backfill: `python -m cfm.data.download --backfill-funding --symbols ...`.
 - Data (M0): `src/cfm/data/binance.py` (bucket listing/XML, HTTP retries, checksum, CSV parsing with header + ts-unit detection), `universe.py` (`scan` / `select`), `download.py` (per-symbol in-memory verified download → convert), `convert.py` (lossless int parquet, dedup, stale-tail trim, funding minute rounding), `load.py` (`read_klines`, `read_funding`), `validate.py`; jobs `universe.sh`, `download.sh` (array), `validate.sh`; tests `test_binance.py`, `test_convert.py` (30 pass)
 
@@ -86,6 +94,7 @@ M−1 evidence:
 - resume_test margin was thin (SIGUSR2 at step 577/600); raise `--total-steps` if it is rerun.
 - `.venv` also contains the user's own unrelated packages (cwevals, opentelemetry, …); don't recreate the venv without asking.
 - A crashed W&B run `f193c8f3` from the first resume attempt is still in the project (user may delete it).
+- BTC/ETH GARCH(1,1) on 1-min data is near-integrated (α+β ≈ 1); `garch_forecast` uses a stable sum and starts segments from the train sample variance. 23 symbols with train data got no GARCH (< 30 days in their last train year or invalid fit) → GARCH is compared on the 273-symbol subset.
 - Home usage after M1: **quota 12.98 GB of 30 GB** (`getquota_zhome.sh`, 2026-10-19 ~14:00) while `du -sh ~` says 20 GB — the quota counts ~apparent size, not NFS block allocation. ~17 GB free. processed/ and stats/ are < 1 MB.
 - Data facts from validation: no funding settlement exists at 2026-06-24 04:00 for 4h-interval symbols (missing in the bucket *and* REST → a real skipped settlement, 189 symbols); 4 single-symbol long funding gaps (≥20 days, halts). 20 candles in 19 symbols have taker_buy_base > volume (upstream rounding). LIT zero-volume share 16%.
 - Raw store layout: `data/raw/parquet/<S>.parquet` (int-encoded; decode only via `cfm.data.load.read_klines`), `data/raw/funding/<S>.parquet`, `data/raw/manifest/<S>.csv` (per-symbol; needed for resume skip) + merged `manifest.csv`, `data/raw/universe/` (scan cache, 1d klines), `data/raw/validation/`.
