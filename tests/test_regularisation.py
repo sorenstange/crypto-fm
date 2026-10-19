@@ -99,3 +99,38 @@ def test_compare_runs_paired_gain():
     assert abs(row["gain"] - 0.01) < 1e-9 and row["gain_ci_lo"] > 0.0099      # paired: tight CI
     total = t[(t.metric == "val_loss") & (t.run == "better")].iloc[0]
     assert abs(total["gain"] - 0.04) < 1e-9
+
+
+def test_flip_matches_features_of_a_mirrored_price_path():
+    """flip_windows on the features of a path == the features of the mirrored path
+    (prices K/p, high <-> low, taker buys <-> sells, funding negated); range_pos only
+    approximately (range in price space), dvol not compared (kept unchanged by design)."""
+    from test_features import CFG, STATS, make_clean, make_funding
+    from cfm.data.augment import flip_tables, flip_windows
+    from cfm.data.features import build_features
+
+    df, n = make_clean(), 3000
+    df = df[df["segment_id"] == df["segment_id"].iloc[0]].iloc[:n].reset_index(drop=True)
+    fr = make_funding(df)
+    k = float(df["close"].iloc[0]) ** 2
+    m = df.copy()
+    m["open"], m["close"] = k / df["open"], k / df["close"]
+    m["high"], m["low"] = k / df["low"], k / df["high"]
+    m["taker_buy_base"] = df["volume"] - df["taker_buy_base"]
+    fm = fr.assign(funding_rate=-fr["funding_rate"])
+    x, _ = build_features(df, fr, STATS, CFG)
+    xm, _ = build_features(m, fm, STATS, CFG)
+    n15 = len(x) // 15 * 15
+    xt = torch.as_tensor(x[:n15].reshape(1, -1, 15 * len(FEATURES)), dtype=torch.float32)
+    perm, sign = flip_tables(torch.device("cpu"), torch.float32)
+    xf, zf = flip_windows(xt, torch.ones(1, xt.shape[1], 4), torch.tensor([True]), perm, sign)
+    xf = xf.reshape(-1, len(FEATURES)).numpy()
+    xm = xm[:n15]
+    approx = {"range_pos": 0.05}
+    for j, f in enumerate(FEATURES):
+        if f == "dvol":        # dollar volume moves with the mirrored price level; the flip keeps it by design
+            continue
+        np.testing.assert_allclose(xf[:, j], xm[:, j], atol=approx.get(f, 1e-4), err_msg=f)
+    assert (zf == -1).all()
+    xb, _ = flip_windows(torch.as_tensor(xf.reshape(xt.shape)), zf, torch.tensor([True]), perm, sign)
+    assert torch.allclose(xb, xt)                                  # flipping twice is the identity

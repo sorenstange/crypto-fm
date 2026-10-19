@@ -1,0 +1,22 @@
+# Regularisation sweep, round 2 (plan.md §16). Round 1: the best step is 750-1250 whatever the
+# regulariser (~1.4 passes over the train patches) -> the generalisable signal is learned in
+# ~1 epoch. Round 2: (a) one-epoch schedules that finish the LR decay before the onset,
+# (b) sign-flip augmentation (cfm.data.augment), both on top of round 1's winners (lr 3e-4,
+# return weights 1/1/0.5/0.25). Compare against reg1/ref, reg1/lr3e4, reg1/retw:
+#     bsub -J "cfm_reg2[1-2]" < jobs/sweep.sh
+#     python -m cfm.eval.compare_runs data/runs/reg1/ref data/runs/reg1/lr3e4 data/runs/reg1/retw data/runs/reg2/*
+name: reg2
+config: configs/backbone.yaml
+tags: [regularisation]
+base:
+  train.lr: 3.0e-4
+  loss.ret_weights: [1.0, 1.0, 0.5, 0.25]
+  train.eval_every: 250
+  train.early_stop_evals: 12
+  eval.save_points: true
+runs:
+  base: {}                                                     # lr3e4 + retw, 20k-step schedule
+  ep1: {train.total_steps: 1500, train.warmup_steps: 200, train.decay_frac: 0.5}
+  ep1b: {train.total_steps: 2500, train.warmup_steps: 250, train.decay_frac: 0.5}
+  flip: {train.flip_prob: 0.5}
+  flip_ep2: {train.flip_prob: 0.5, train.total_steps: 3000, train.warmup_steps: 300, train.decay_frac: 0.5}

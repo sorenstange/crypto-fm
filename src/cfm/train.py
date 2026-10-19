@@ -10,6 +10,7 @@
 - Loss: sum_h w_h CE_h + w_vol * sum_h QLIKE_h + z_loss * z-loss (`losses.py`); CE_h can use
   HL-Gauss soft targets (`loss.hl_gauss_sigma`, in z units). Logged and evaluated CE is
   always the hard (one-hot) CE.
+- Optional sign-flip augmentation of train windows (`train.flip_prob`, `data/augment.py`).
 - AdamW, WSD schedule, grad clipping, bf16 autocast, torch.compile.
 - Every `eval_every` steps: validation subset -> CE gain over the train marginal, QLIKE vs.
   EWMA/HAR, rank IC; the best checkpoint (lowest unweighted validation loss
@@ -42,6 +43,7 @@ import numpy as np
 import torch
 import yaml
 
+from cfm.data.augment import flip_tables, flip_windows
 from cfm.data.config import PROJECT_ROOT, load_data_config
 from cfm.data.dataset import (PatchData, WindowSampler, build_patch_data, eval_windows, n_features,
                               start_weights, train_starts)
@@ -209,8 +211,13 @@ def train_run(bcfg: dict, dcfg: dict, prep: Prepared, run_dir: Path, *, stopper:
                 "scaler": scaler.state_dict(), "sampler": sampler.state_dict(),
                 "rng": capture_rng_state(), "config": config}
 
-    def loss_on(starts_b):
+    flip_perm, flip_sign = flip_tables(device, gpu.feats.dtype)
+
+    def loss_on(starts_b, augment: bool = False):
         _, x, z, rv, s2 = gpu.batch(starts_b, L)
+        if augment and tc["flip_prob"] > 0:
+            flip = torch.rand(x.shape[0], device=device) < tc["flip_prob"]
+            x, z = flip_windows(x, z, flip, flip_perm, flip_sign)
         with autocast():
             logits, u = fwd(x.to(amp_dtype or torch.float32))
         B = x.shape[0] * x.shape[1]
@@ -244,7 +251,7 @@ def train_run(bcfg: dict, dcfg: dict, prep: Prepared, run_dir: Path, *, stopper:
         if stopper.should_stop():
             status = "interrupted"
             break
-        loss, ce_h, ql_h, zl = loss_on(sampler.sample(tc["batch_size"]))
+        loss, ce_h, ql_h, zl = loss_on(sampler.sample(tc["batch_size"]), augment=True)
         opt.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         scaler.unscale_(opt)

@@ -33,6 +33,7 @@ train:
   decay_frac: 0.2            # WSD: linear decay over the last 20%
   batch_size: 256
   grad_clip: 1.0
+  flip_prob: 0.0             # sign-flip augmentation: probability of mirroring a train window (cfm.data.augment)
   precision: bf16            # bf16 | fp16 (V100) | fp32
   compile: true
   log_every: 50
