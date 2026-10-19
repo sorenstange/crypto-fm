@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated: 2026-10-19, end of session 1 (M−1). All work committed; no jobs running._
+_Last updated: 2026-10-19, session 2 (M0 step 1: bucket explored). No jobs running._
 
 ## Current milestone
 **M−1 (HPC environment) — DONE and verified 2026-10-19.** M0 (data acquisition) is next; nothing for M0 written yet.
@@ -11,7 +11,7 @@ M−1 evidence:
 - Chained resume test `cfm_resume_10191056` (jobs 29754139 → 29754140): job 1 stopped on the LSF SIGUSR2 walltime warning at step 577, job 2 resumed to 600; uninterrupted rerun identical (loss/param diff 0.0); one continuous W&B run `rudyhuy/crypto-fm/runs/334b5f4a` (`scripts/check_wandb_run.py` PASSED).
 
 ## Next steps (M0, plan.md §2)
-1. Explore the bucket before writing parsers: futures/um listing (paginated), `fundingRate` path + columns, header row present or not, timestamp unit (ms vs µs) per file.
+1. ~~Explore the bucket~~ — DONE 2026-10-19 (session 2), findings below under "Binance bucket facts".
 2. `src/cfm/data/universe.py`: list all `*USDT` perps incl. delisted, apply §2.2 exclusions, rank by median daily quote volume (1d klines), ≥12 months history. **Show the symbol list to the user for review** before the full download.
 3. Pilot: `download.py` + `jobs/download.sh` (CPU queue `hpc`; compute nodes have internet) for BTCUSDT/ETHUSDT, 2 months; checksum-verified, manifest written.
 4. **Storage budget** from the pilot sizes: extrapolate zips + parquet for the full universe against the free quota (~19 GB) before the full download. Delete zips once converted + verified (keep manifest with sha256).
@@ -28,6 +28,19 @@ M−1 evidence:
 - Commits go directly on `main`. Remote `origin` = github.com/sorenstange/crypto-fm; session-1 commits are **not pushed** (push only when the user asks).
 - Chaining: `jobs/submit_chain.sh N script name` chains by **job ID** (`-w done(id)`); all jobs share the job name → same run dir `$RUNS_DIR/<name>`. `DEP=ended` continues after crashes.
 - Walltime: `#BSUB -wa USR2 -wt <min>` + `cfm_run` (common.sh) forwards SIGUSR2/SIGTERM to Python; `cfm.utils.run.GracefulStop` → checkpoint and exit 0. Use `-wt 15` for real training.
+
+## Binance bucket facts (explored 2026-10-19, session 2)
+- **Listing:** `https://s3-ap-northeast-1.amazonaws.com/data.binance.vision?prefix=...&delimiter=/&marker=...`, 1000 entries/page, continue with `NextMarker` (or last `<Key>` when no delimiter). **Parse the XML properly** — newer `<Contents>` entries carry extra `<ChecksumAlgorithm>/<ChecksumType>` elements; a naive Key…ETag…Size regex silently dropped everything after 2025-01.
+- futures/um monthly types: aggTrades, bookTicker, fundingRate, indexPriceKlines, klines, markPriceKlines, premiumIndexKlines, trades. Daily additionally: bookDepth, metrics.
+- **Symbols (monthly/klines): 1056** = 900 `*USDT`, 52 dated (`_YYMMDD`), 40 `*USDC`, 41 `*BUSD`, plus odd ones: `ETHBTC`, `BTCU`/`ETHU`, `*USD1`, and 19 `*USDTSETTLED` / `*USDT_SETTLED` (even `AERGOUSDTSETTLEDSETTLED`). All 900 USDT symbols have a fundingRate dir.
+  - `*SETTLED` = copies/fragments of a contract around a settlement/delist-relist (ICPUSDT_SETTLED duplicates ICPUSDT 2022; BNXUSDTSETTLED = old pre-2023-02-22 BNX contract at ~100 USDT, while BNXUSDT relisted redenominated at ~1.4 and ends the old stretch with flat zero-volume candles). → **exclude `*SETTLED`**; the main symbol's long gaps / price jumps are handled by Phase-1 segment splitting.
+  - Index/basket: `BTCDOMUSDT`, `DEFIUSDT`, `BLUEBIRDUSDT`, `FOOTBALLUSDT`. Stable/commodity: `USDCUSDT`, `PAXGUSDT`, `XAUTUSDT` (exclude). `BUSDT`/`TUSDT` are regular tokens (B, T), not stablecoins.
+- **Coverage:** BTCUSDT 1m monthly 2020-01 … 2026-09 (81 files, 152 MB zipped, ~1.9 MB/month); daily files cover the current month up to yesterday (2026-10-18). premiumIndex/markPrice klines from 2020-01; daily `metrics` from 2020-09.
+- **Kline CSV:** 12 columns (open_time, open, high, low, close, volume, close_time, quote_volume, count, taker_buy_volume, taker_buy_quote_volume, ignore). **Header row varies:** absent in older files (BTCUSDT 2020-01, ICPUSDT 2022-03), present in others (BTC 2022-06+, ICPUSDT_SETTLED 2022-03) → detect per file. Timestamps are **13-digit ms in every futures file checked (incl. 2026 daily)**; keep the magnitude check anyway.
+- **Checksum:** `<sha256>  <filename>` in `<url>.CHECKSUM`; verified OK on all samples.
+- **fundingRate CSV:** header `calc_time,funding_interval_hours,last_funding_rate`; `calc_time` in ms with **0–20 ms jitter** (e.g. …800005) → round to the nearest minute. Interval stored per row: 8h (BTC, DOGE, PEPE), 4h (WIF, TRUMP), 1h (ALPACA 2025-06). No mark price column.
+- 1d klines exist per symbol/month (`klines/{S}/1d/`, ~4 KB each) for the volume ranking; a listing request takes ~1.5 s.
+- Rough size: 100M candles ≈ 2,300 symbol-months ≈ ≤ 4.4 GB of zips at BTC's per-month size (alts likely smaller).
 
 ## Running / pending jobs
 - None (`bjobs` empty at session end, 2026-10-19).
