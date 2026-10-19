@@ -1,0 +1,35 @@
+# Data pipeline configuration (plan.md Phases 1-3). Times are UTC.
+
+splits:                          # chosen 2026-10-19 (plan.md §15.3)
+  train_end: "2024-12-31 23:59"
+  val_start: "2025-01-01 00:00"
+  val_end: "2025-09-30 23:59"
+  test_start: "2025-10-01 00:00"
+  test_end: "2026-09-30 23:59"
+  embargo_days: 3                # >= 1 day + context (1920 min); applied at the start of val and test
+
+clean:                           # Phase 1 (plan.md §3); output is a segment index, not a data copy
+  max_fill_gap_minutes: 15       # shorter gaps are forward-filled (flag `filled`), longer ones split
+  max_abs_log_return: 0.10       # |ln C_t/C_{t-1}| or |ln O_t/C_{t-1}| above this splits a segment
+  jump_allowlist: []             # [[SYMBOL, "YYYY-MM-DD HH:MM"], ...] jumps confirmed real
+  max_identical_run: 15          # longer runs of flat candles (O=H=L=C=previous close) are dropped
+  max_zero_volume_run: 45        # longer runs of zero-volume candles are dropped
+  listing_warmup_days: 3         # dropped after listing ...
+  relist_gap_days: 7             # ... and after any gap at least this long (delist/relist)
+  min_segment_minutes: 3420      # warmup 1440 + context 1920 + max horizon 60
+
+vol:                             # Phase 2 (plan.md §4.1)
+  estimator: garman_klass        # garman_klass | parkinson | rogers_satchell
+  half_life_minutes: 60
+  seasonality:
+    period_minutes: 10080        # minute of week
+    winsor_quantile: 0.999       # per-symbol cap on per-candle variance before averaging
+  floor:                         # causal adaptive floor: sigma >= ratio * slow EWMA sigma
+    half_life_minutes: 10080
+    ratio: 0.2
+    abs_min: 1.0e-6
+
+features:                        # Phase 2 (plan.md §4.2-4.3)
+  trailing_minutes: 1440         # window for vrel / trade-count / range-position / volume level
+  squash: 5.0                    # x <- s * tanh(x / s)
+  dtype: float32
