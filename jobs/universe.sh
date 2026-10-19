@@ -15,4 +15,4 @@
 set -euo pipefail
 source jobs/common.sh
 python -m cfm.data.universe scan --workers 16
-python -m cfm.data.universe select
+python -m cfm.data.universe select --min-median-qv 5e6   # liquidity floor chosen 2026-10-19

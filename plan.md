@@ -196,7 +196,7 @@ Download raw 1-minute klines and funding rates for a broad universe of Binance U
 - **On DTU HPC:** wrap the downloader in `jobs/download.sh`. If compute nodes have internet, submit it to the CPU queue; otherwise run it on the login/transfer node (see 1.1). Conversion and validation run as CPU job arrays (`jobs/convert.sh`, one element per symbol).
 
 ### 2.4 Convert and validate (`convert.py`, `validate.py`)
-- **Klines:** convert to one parquet per symbol with columns `ts (UTC), open, high, low, close, volume, quote_volume, n_trades, taker_buy_base, taker_buy_quote`. Prices in float64, sorted, deduplicated.
+- **Klines:** convert to one parquet per symbol with columns `ts (UTC), open, high, low, close, volume, n_trades, taker_buy_base`, sorted, deduplicated. Stored losslessly as integers (prices in ticks, volumes in lots, delta-encoded) and decoded to float64 on load. `quote_volume` and `taker_buy_quote` are dropped to save space (see 15.2).
 - **Funding:** one parquet per symbol with `funding_time (UTC), funding_rate` (plus mark price if present). Note the funding interval can differ by symbol and change over time (commonly 8h, sometimes 4h or 1h), so store the actual timestamps rather than assuming a schedule.
 - **Validation report per symbol:**
   - rows per month vs. minutes in that month
@@ -504,3 +504,11 @@ pnl_t = pos_t · r_{t→t+15}                         # log or simple return of 
    - Internet on compute nodes: tested in M−1 (`jobs/check_net.sh`, `jobs/test_gpu.sh`).
    - CPU queue: `hpc`; no LSF email notifications.
    - Consequence: torch is the CUDA 13 build (smaller wheel), so `gpuv100` (no sm_70 support) is not a fallback; use `gpua100`, `gpul40s` or `gpuh100`.
+
+### 15.2 Data budget decisions (2026-10-19)
+
+- **Maximize candles** within the quota while leaving headroom for checkpoints and other tasks; ≥100M is a minimum, not the target.
+- Universe: USDT perpetuals with a COIN underlying (exchangeInfo; TradFi, index, stable and gold contracts excluded), ≥365 days of history, **median daily quote volume ≥ $5M** → 347 symbols, ~647M estimated candles.
+- Raw klines stored as lossless integers **without `quote_volume` / `taker_buy_quote`** (~15 B/candle vs ~45 B for float64 parquet). Exact daily quote volume stays available in `data/raw/universe/klines_1d.parquet`; per-minute dollar volume ≈ volume × price.
+- Budget: ~10.5 GB for raw klines, ~8.5 GB reserved (checkpoints 3, W&B/logs/eval 1, stats/indices 1, transient 1.5, safety 2).
+- **Phases 1–3 must not store a second full copy** of the data: cleaning produces a segment index (plus flags), and features are computed in RAM when the dataset is built (or stored compactly if that proves too slow).

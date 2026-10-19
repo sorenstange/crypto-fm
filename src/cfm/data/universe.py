@@ -80,6 +80,45 @@ def _out_dir() -> Path:
 
 # --- scan -----------------------------------------------------------------------------
 
+def daily_stats(daily: pd.DataFrame) -> dict:
+    """History/liquidity stats from one symbol's 1d klines (sorted, deduplicated).
+
+    Settled/delisted contracts keep producing flat zero-volume candles after trading
+    ends; that trailing stale tail is excluded from every stat (and is trimmed by the
+    converter).
+    """
+    qv = daily["quote_volume"].to_numpy()
+    active = np.flatnonzero(qv > 0)
+    n_active = active[-1] + 1 if len(active) else 0
+    stats = {"trailing_zero_days": len(daily) - n_active}
+    if not n_active:
+        return stats
+    day = pd.to_datetime(daily["open_time"].to_numpy()[:n_active], unit="ms", utc=True)
+    qv = qv[:n_active]
+    last_year = day >= day[-1] - pd.Timedelta(days=365)
+    return stats | {"first_day": day[0].date().isoformat(),
+                    "last_day": day[-1].date().isoformat(),
+                    "n_days": n_active,
+                    "zero_volume_days": int((qv == 0).sum()),
+                    "est_candles": n_active * MINUTES_PER_DAY,
+                    "median_daily_qv": float(np.median(qv)),
+                    "median_daily_qv_last365": float(np.median(qv[last_year]))}
+
+
+STAT_COLUMNS = ["trailing_zero_days", "first_day", "last_day", "n_days", "zero_volume_days",
+                "est_candles", "median_daily_qv", "median_daily_qv_last365"]
+
+
+def recompute_daily_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """Refresh the 1d-derived columns of candidates.csv from the cached klines_1d.parquet."""
+    daily = pd.read_parquet(_out_dir() / "klines_1d.parquet",
+                            columns=["symbol", "open_time", "quote_volume"])
+    stats = {s: daily_stats(g.sort_values("open_time")) for s, g in daily.groupby("symbol")}
+    fresh = pd.DataFrame.from_dict(stats, orient="index").reindex(columns=STAT_COLUMNS)
+    df = df.drop(columns=[c for c in STAT_COLUMNS if c in df.columns])
+    return df.merge(fresh, left_on="symbol", right_index=True, how="left")
+
+
 def scan_symbol(symbol: str) -> tuple[dict, pd.DataFrame]:
     """1m monthly file listing + all 1d klines of one symbol -> (stats, 1d frame)."""
     m1 = [k for k in bn.list_keys(bn.kline_prefix(symbol, "1m")) if k.key.endswith(".zip")]
@@ -97,16 +136,7 @@ def scan_symbol(symbol: str) -> tuple[dict, pd.DataFrame]:
     daily = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     if len(daily):
         daily = daily.drop_duplicates("open_time").sort_values("open_time", ignore_index=True)
-        day = pd.to_datetime(daily["open_time"], unit="ms", utc=True)
-        qv = daily["quote_volume"].to_numpy()
-        last_year = (day >= day.iloc[-1] - pd.Timedelta(days=365)).to_numpy()
-        stats |= {"first_day": day.iloc[0].date().isoformat(),
-                  "last_day": day.iloc[-1].date().isoformat(),
-                  "n_days": len(daily),
-                  "zero_volume_days": int((qv == 0).sum()),
-                  "est_candles": len(daily) * MINUTES_PER_DAY,
-                  "median_daily_qv": float(np.median(qv)),
-                  "median_daily_qv_last365": float(np.median(qv[last_year]))}
+        stats |= daily_stats(daily)
         daily.insert(0, "symbol", symbol)
     return stats, daily
 
@@ -160,7 +190,7 @@ def scan(workers: int) -> None:
 
 def select(min_days: int, max_candles: float | None, min_median_qv: float,
            out_yaml: Path) -> pd.DataFrame:
-    df = pd.read_csv(_out_dir() / "candidates.csv")
+    df = recompute_daily_stats(pd.read_csv(_out_dir() / "candidates.csv"))
     df["exclusion"] = df["exclusion"].astype(object)
     pending = df["exclusion"].isna()
     df.loc[pending & (df["n_1m_months"].fillna(0) == 0), "exclusion"] = "no 1m kline files"
@@ -187,6 +217,7 @@ def select(min_days: int, max_candles: float | None, min_median_qv: float,
         return {"symbol": r.symbol, "rank": int(r.rank), "status": r.status,
                 "first_day": r.first_day, "last_day": r.last_day, "n_days": int(r.n_days),
                 "est_candles": int(r.est_candles),
+                "stale_tail_days": int(r.trailing_zero_days),
                 "median_daily_qv_musd": round(float(r.median_daily_qv) / 1e6, 2),
                 "zip_mb_1m": round(float(r.zip_mb_1m), 1)}
 
