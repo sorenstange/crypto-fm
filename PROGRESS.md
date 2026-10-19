@@ -1,21 +1,27 @@
 # Progress
 
-_Last updated: 2026-10-19, session 2 (M0 step 1: bucket explored). No jobs running._
+_Last updated: 2026-10-19, session 2 (M0 done). No jobs running._
 
 ## Current milestone
-**M−1 (HPC environment) — DONE and verified 2026-10-19.** M0 (data acquisition) is next; nothing for M0 written yet.
+**M0 (data acquisition) — DONE 2026-10-19.** Next: M1 (Phase 1 cleaning + Phase 2 features, plan.md §3–4) — not started; wait for the user's go-ahead.
+
+M0 evidence (`data/raw/validation/summary.txt`, job 29754547):
+- Universe: **371 symbols** (`configs/universe.yaml`; COIN-underlying USDT perps, ≥365 active days, median daily quote volume ≥ $5M, delisted/settling included).
+- Download array 29754541 (371 elements, ~30 min): **31,063 files, all `ok`, every one SHA-256-verified** (15,860 kline months + 15,203 funding months, up to 2026-09). Merged manifest `data/raw/manifest.csv`.
+- **641,266,398 candles**, kline parquet 6.6 GB apparent (10.3 B/candle), funding 16 MB.
+- Coverage median 1.0000 (min 0.975 BNX); 0 duplicates, 0 non-monotonic, 0 OHLC-invalid, 0 NaN; 105 long gaps (all ≥ 3 days: halts, delist/relist), none ≤ 15 min.
+- REST spot-check: 60 symbol-days (BTC, ETH, ENS, CHR, FIDA, RVN) — **0 mismatches**, identical row sets.
+- Funding present for every symbol; intervals 1/2/4/8 h.
 
 M−1 evidence:
 - `jobs/test_gpu.sh` (job 29753877, A100-PCIE-40GB): bf16 fwd/bwd, initial CE ≈ ln(66), flash SDPA, torch.compile all PASS.
 - `jobs/tests.sh` (job 29754141): 6/6 pytest pass (CPU resume is bitwise identical).
-- Chained resume test `cfm_resume_10191056` (jobs 29754139 → 29754140): job 1 stopped on the LSF SIGUSR2 walltime warning at step 577, job 2 resumed to 600; uninterrupted rerun identical (loss/param diff 0.0); one continuous W&B run `rudyhuy/crypto-fm/runs/334b5f4a` (`scripts/check_wandb_run.py` PASSED).
+- Chained resume test `cfm_resume_10191056` (jobs 29754139 → 29754140): one continuous W&B run `rudyhuy/crypto-fm/runs/334b5f4a`.
 
-## Next steps (M0, plan.md §2)
-1. ~~Explore the bucket~~ — DONE 2026-10-19 (session 2), findings below under "Binance bucket facts".
-2. `src/cfm/data/universe.py` — scan DONE (job 29754392, 11 min; `select` re-run on login node after a YAML numpy-float fix). 567 eligible symbols (145 not trading now), ~874M est. candles, 27.2 GB of 1m zips; ranked list in `configs/universe.yaml`, raw scan in `data/raw/universe/`. **Waiting for the user: liquidity floor / candle budget and whether to drop the quote-volume columns** (see Storage budget).
-3. Pilot: `download.py` + `jobs/download.sh` (CPU queue `hpc`; compute nodes have internet) for BTCUSDT/ETHUSDT, 2 months; checksum-verified, manifest written.
-4. **Storage budget** from the pilot sizes: extrapolate zips + parquet for the full universe against the free quota (~19 GB) before the full download. Delete zips once converted + verified (keep manifest with sha256).
-5. Full download (job array per symbol), `convert.py`, `validate.py`, REST spot-checks → M0 acceptance. Then stop and report.
+## Next steps (M1, plan.md §3–4) — after user go-ahead
+1. Phase 1 cleaning as a **segment index** (no second data copy, plan.md §15.2): forward-fill ≤15-min gaps (none exist), split at long gaps / |r| > 0.10 jumps / >15 identical / >45 zero-volume candles, drop first 3 days after listing, min segment length; clip the 20 taker_buy > volume candles; cleaning report per symbol.
+2. Phase 2 features computed in RAM (vol.py, features.py), causality tests, `jobs/tests.sh`.
+3. Optional: backfill pre-relist funding for ICPUSDT (2021-05…2022-08) and BNXUSDT (2022-04…2023-01) and QTUMUSDT's first 9 days from REST `/fapi/v1/fundingRate` (has the history; the bucket and `*SETTLED` dirs don't).
 
 ## Decisions made
 - Section 15 answers: recorded in plan.md §15.1 (universe top ~50–100 USDT perps from 2020; c = 0.05% + 0.02%; equal-weight portfolio; 15-min decisions).
@@ -49,6 +55,9 @@ M−1 evidence:
 - Floors (median daily quote volume): ≥$5M → 348 symbols, ~648M candles, ~9.7 GB @15 B; ≥$10M → 218 / 476M; ≥$2M → 482 / 781M / 11.7 GB.
 - venv is 9.9 GB (nvidia 4.2, torch 2.1, triton 1.2); not touched.
 
+- Universe is ranked on the **active** history: 52+ settled/delisted contracts keep producing flat zero-volume candles after trading ends (DAR: 927k after 2024-12-26); stats exclude that tail and the converter trims trailing zero-volume runs ≥ 1 day. Applying this moved the $5M-floor universe from 347 to 371 symbols (~642M est. candles).
+- Pilot bytes/candle (int store, full history): BTC 14.4, ETH 13.2, LUNA 11.8, HYPER 9.3; full universe 10.3.
+
 ## Running / pending jobs
 - None (`bjobs` empty at session end, 2026-10-19).
 
@@ -58,6 +67,7 @@ M−1 evidence:
 - `src/cfm/utils/checkpoint.py` (atomic save, RNG capture/restore), `src/cfm/utils/run.py` (run info, `init_wandb`, `GracefulStop`) — reuse these in `cfm.train`
 - `src/cfm/smoke/gpu_check.py`, `src/cfm/smoke/resume_test.py`; `tests/test_resume.py`
 - `scripts/check_wandb_run.py`, `scripts/wandb_sync.sh` (offline fallback, currently unneeded)
+- Data (M0): `src/cfm/data/binance.py` (bucket listing/XML, HTTP retries, checksum, CSV parsing with header + ts-unit detection), `universe.py` (`scan` / `select`), `download.py` (per-symbol in-memory verified download → convert), `convert.py` (lossless int parquet, dedup, stale-tail trim, funding minute rounding), `load.py` (`read_klines`, `read_funding`), `validate.py`; jobs `universe.sh`, `download.sh` (array), `validate.sh`; tests `test_binance.py`, `test_convert.py` (30 pass)
 
 ## Gotchas / open issues
 - The python3 module sets `PYTHONPATH`/`PYTHONHOME` to its site-packages, which shadows the venv; `cfm_load_modules` unsets both. Don't re-add them.
@@ -69,7 +79,9 @@ M−1 evidence:
 - resume_test margin was thin (SIGUSR2 at step 577/600); raise `--total-steps` if it is rerun.
 - `.venv` also contains the user's own unrelated packages (cwevals, opentelemetry, …); don't recreate the venv without asking.
 - A crashed W&B run `f193c8f3` from the first resume attempt is still in the project (user may delete it).
-- Home usage at session end: 11 GB of 30 GB (`du -sh ~`), of which the venv is 9.9 GB and `data/` 3.5 MB.
+- Home usage after M0: **20 GB of 30 GB by `du -sh ~`** (venv 9.9, data/raw 8.5 by du). The home NFS allocates ~30% more than file sizes (parquet 6.2 GiB apparent vs 8.3 GiB `du`); `getquota_zhome.sh` was still stale (11:04) — check which of the two the quota counts. ~10 GB left → budget checkpoints with the 1.3× overhead.
+- Data facts from validation: no funding settlement exists at 2026-06-24 04:00 for 4h-interval symbols (missing in the bucket *and* REST → a real skipped settlement, 189 symbols); 4 single-symbol long funding gaps (≥20 days, halts). 20 candles in 19 symbols have taker_buy_base > volume (upstream rounding). LIT zero-volume share 16%.
+- Raw store layout: `data/raw/parquet/<S>.parquet` (int-encoded; decode only via `cfm.data.load.read_klines`), `data/raw/funding/<S>.parquet`, `data/raw/manifest/<S>.csv` (per-symbol; needed for resume skip) + merged `manifest.csv`, `data/raw/universe/` (scan cache, 1d klines), `data/raw/validation/`.
 - `/dtu/blackhole` and `/work3` need HPC-support-created dirs; the user chose not to request them.
 
 ## How to resume work
