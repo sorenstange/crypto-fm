@@ -29,6 +29,15 @@ vol:                             # Phase 2 (plan.md §4.1)
     ratio: 0.2
     abs_min: 1.0e-6
 
+targets:                         # Phase 4 (plan.md §6); predictions are made at patch ends
+  patch_minutes: 15              # clock-aligned: predictions at the end of :14, :29, :44, :59
+  warmup_minutes: 1440           # no prediction before this much segment history
+  return_horizons: [1, 5, 15, 60]
+  vol_horizons: [15, 60]
+  bins: {n_inner: 64, lo: -5.0, hi: 5.0}   # + 2 tail bins = 66 classes
+  # z_h = ln(C_{t+h}/C_t) / (sigma_t * sqrt(sum season_{t+1..t+h}))    sigma_t known at t
+  # RV_h = sum_{k=1..h} v_{t+k} / season_{t+k}                          deseasonalised
+
 features:                        # Phase 2 (plan.md §4.2-4.3)
   trailing_minutes: 1440         # window for vrel / trade-count / range-position / volume level
   squash: 5.0                    # x <- s * tanh(x / s)
