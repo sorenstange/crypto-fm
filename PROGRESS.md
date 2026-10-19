@@ -1,9 +1,9 @@
 # Progress
 
-_Last updated: 2026-10-19, session 3. M3 criteria met by `cfm_bb_v1` (job 29758436) — diagnostics and controls done (no leak; gain is mostly volatility/tick size, direction ≈ short-term reversal) — **awaiting the user's decision on accepting M3**. Return heads overfit (best checkpoint at step 1000). No jobs running. Commits not pushed (no GitHub credentials on the cluster yet)._
+_Last updated: 2026-10-19, session 3. M3 criteria met by `cfm_bb_v1` (job 29758436) — **M3 ACCEPTED by the user** (no leak; gain mostly volatility/tick size, direction ≈ short-term reversal). Next: regularisation fix for the overfitting return heads (planning), then stronger baselines, then M4. No jobs running. Commits not pushed (no GitHub credentials on the cluster yet)._
 
 ## Current milestone
-**M3 (backbone v1) — IN PROGRESS.** All code is written, committed, unit-tested and smoke-tested on an L40S. Full run `cfm_bb_v1` (job 29758436) **meets the M3 criteria** (below); reported to the user, not yet accepted.
+**M3 (backbone v1) — DONE, accepted 2026-10-19 (session 3)** with the caveats below. Pre-M4 work: (1) regularisation fix, (2) stronger yardsticks (HAR-rescaled marginal, reversal IC baselines). All code is written, committed, unit-tested and smoke-tested on an L40S. Full run `cfm_bb_v1` (job 29758436) **meets the M3 criteria** (below); reported to the user, not yet accepted.
 
 Session 2 summary: M0 (data), M1 (cleaning + features) and M2 (baselines) were completed and accepted; M3 code was written.
 
@@ -64,7 +64,7 @@ M−1 evidence:
 
 ## Next steps (M3)
 1. ~~Diagnostics~~ **done** (see above). Was: (the CE gains / h1 IC look large for this SNR): (a) a "HAR-scaled marginal" return baseline — marginal shape rescaled by sqrt(HAR/EWMA variance) — to separate the volatility-scale part of the CE gain; (b) the IC of a trivial 1-minute reversal signal (−last return) to see how much of the h1 IC is bid-ask bounce; (c) a shuffled-target control (permute targets across windows → gain must vanish); (d) a one-patch feature-lag control (input ends one patch before the prediction point → gain should shrink, not collapse); also check the share of the zero-return bin per symbol (tick-size discreteness on low-priced coins).
-2. Full run done (job 29758436): all M3 criteria met. **Waiting for the user's verdict on accepting M3.** Proposed for later milestones: HAR-rescaled marginal as the return baseline and reversal signals as IC baselines (vs marginal is a weak bar).
+2. Full run done (job 29758436): all M3 criteria met; **M3 accepted by the user**. Proposed for later milestones: HAR-rescaled marginal as the return baseline and reversal signals as IC baselines (vs marginal is a weak bar).
 3. Overfitting of the return heads (best at step 1000, during warm-up): options to discuss — eval every 100–250 steps, stronger regularisation (dropout, weight decay), lower LR, fewer/shorter-overlap targets, removing absolute-time cues, or a data-fraction check in the M4 ladder. Do not start M4 before this is decided.
 4. Clean-up: `data/runs/smoke_m3` deleted (session 3); W&B smoke runs `afa7d897` (and the failed attempts) can be deleted if the user wants.
 5. Push: needs GitHub credentials on the cluster (no gh, no SSH key, no credential helper) — user to choose a PAT push via `! git push https://sorenstange@github.com/...` or an SSH key for the cluster.
