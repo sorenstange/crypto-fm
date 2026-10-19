@@ -13,6 +13,9 @@
 - Checkpoint (model, optimizer, scheduler, sampler, RNG, step, best) every
   `ckpt_every_minutes`, on SIGUSR2/SIGTERM and at the end; resumed jobs continue the
   same W&B run.
+- Diagnostic controls (M3): `--shuffle-train-targets` permutes the return targets across
+  train patches (validation gains must then vanish); `--input-lag k` shows the model only
+  the inputs up to k patches before each prediction point.
 - When training ends: the best checkpoint is evaluated on all validation points with
   day-block-bootstrap CIs (`<run-dir>/eval/`), and the run is marked COMPLETED.
 """
@@ -47,6 +50,17 @@ from cfm.utils.run import COMPLETED_FILE, GracefulStop, collect_run_info, init_w
 BEST = "best.pt"
 
 
+class InputLag(torch.nn.Module):
+    """Shift inputs [B, L, D] by `lag` patches along L (zeros in front): position p sees patches <= p - lag."""
+
+    def __init__(self, model, lag: int):
+        super().__init__()
+        self.model, self.lag = model, lag
+
+    def forward(self, x: torch.Tensor):
+        return self.model(torch.cat([torch.zeros_like(x[:, :self.lag]), x[:, :-self.lag]], dim=1))
+
+
 def wsd(step: int, total: int, warmup: int, decay_frac: float) -> float:
     decay_start = int((1 - decay_frac) * total)
     if step < warmup:
@@ -68,7 +82,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-dir", type=Path, required=True)
     p.add_argument("--symbols", nargs="+", help="subset of the universe (smoke tests)")
     p.add_argument("--total-steps", type=int, help="override train.total_steps")
+    p.add_argument("--max-steps", type=int, help="stop after this many steps (keeps the LR schedule of total_steps)")
     p.add_argument("--max-minutes", type=float, help="stop (and checkpoint) after this long")
+    p.add_argument("--shuffle-train-targets", action="store_true", help="control: permute train return targets")
+    p.add_argument("--input-lag", type=int, default=0, help="control: inputs end this many patches early")
     p.add_argument("--no-compile", action="store_true")
     p.add_argument("--name", help="W&B run name (default: run dir name)")
     p.add_argument("--group", default="backbone")
@@ -101,6 +118,10 @@ def main(argv: list[str] | None = None) -> int:
     baseline_params = json.loads((stats_dir() / "baselines.json").read_text())
     symbols = args.symbols or universe_symbols()
     data = build_patch_data(symbols, stats, dcfg, bcfg)
+    if args.shuffle_train_targets:
+        tr = np.flatnonzero(data.split == 0)
+        data.z[tr] = data.z[np.random.default_rng(tc["seed"] + 2).permutation(tr)]
+        print(f"[train] CONTROL: return targets of {len(tr):,} train patches shuffled", flush=True)
     gpu = GPUData(data, device)
     starts = train_starts(data, L, W)
     sampler = WindowSampler(starts, start_weights(data, starts, bcfg["data"]["symbol_weight_power"]),
@@ -123,6 +144,10 @@ def main(argv: list[str] | None = None) -> int:
         opt, lambda s: wsd(s, tc["total_steps"], tc["warmup_steps"], tc["decay_frac"]))
     scaler = torch.amp.GradScaler(device.type, enabled=tc["precision"] == "fp16")
     fwd = torch.compile(model) if tc["compile"] and device.type == "cuda" else model
+    if args.input_lag:
+        fwd = InputLag(fwd, args.input_lag)
+        print(f"[train] CONTROL: inputs lagged by {args.input_lag} patch(es)", flush=True)
+    last_step = min(tc["total_steps"], args.max_steps or tc["total_steps"])
 
     step, best, since_best = 0, math.inf, 0
     ckpt = latest_checkpoint(ckpt_dir)
@@ -137,7 +162,9 @@ def main(argv: list[str] | None = None) -> int:
         step, best, since_best = st["step"], st["best"], st["since_best"]
         print(f"[resume] {ckpt} at step {step} (best val {best:.4f})", flush=True)
 
-    config = {"backbone": bcfg, "data": dcfg, "n_params": n_params, "symbols": len(symbols)}
+    config = {"backbone": bcfg, "data": dcfg, "n_params": n_params, "symbols": len(symbols),
+              "control": {"shuffle_train_targets": args.shuffle_train_targets, "input_lag": args.input_lag,
+                          "max_steps": args.max_steps}}
     info = collect_run_info()
     write_run_info(run_dir, config, info)
     run = init_wandb(run_dir, config, info, name=args.name, group=args.group,
@@ -180,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     t_ckpt = t_log = time.time()
     tokens = 0
     status = "completed"
-    while step < tc["total_steps"]:
+    while step < last_step:
         if stopper.should_stop():
             status = "interrupted"
             break
@@ -211,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
                 break
             t_log, tokens = time.time(), 0
 
-        if step % tc["eval_every"] == 0 or step == tc["total_steps"]:
+        if step % tc["eval_every"] == 0 or step == last_step:
             _, summ = evaluate(sub, bootstrap=False)
             vl = val_loss(summ, dcfg, lc["w_vol"])
             if vl < best:

@@ -43,10 +43,13 @@ def bin_centers(edges: np.ndarray) -> np.ndarray:
 
 @torch.no_grad()
 def predict_points(model, data: GPUData, starts, score_from, score_to, L: int, edges_t: torch.Tensor,
-                   vol_horizons: list[int], batch_size: int, amp_dtype=None) -> dict:
+                   vol_horizons: list[int], batch_size: int, amp_dtype=None, symmetric: bool = False) -> dict:
+    """Per scored point: idx, CE [n, H], QLIKE [n, Hv], predicted mean z [n, H]; with
+    `symmetric` also "ce_sym", the CE of the mirror-symmetrised distribution (bins are
+    symmetric around 0), which removes all directional information."""
     model.eval()
     centers = torch.as_tensor(bin_centers(edges_t.cpu().numpy()), device=data.device, dtype=torch.float32)
-    out = {"idx": [], "ce": [], "qlike": [], "mean": []}
+    out = {"idx": [], "ce": [], "qlike": [], "mean": []} | ({"ce_sym": []} if symmetric else {})
     ctx = torch.autocast(data.device.type, dtype=amp_dtype) if amp_dtype else nullcontext()
     ar = torch.arange(L, device=data.device)
     for i in range(0, len(starts), batch_size):
@@ -68,6 +71,12 @@ def predict_points(model, data: GPUData, starts, score_from, score_to, L: int, e
         out["ce"].append(ce.cpu())
         out["qlike"].append(ql.cpu())
         out["mean"].append((lg.softmax(-1) @ centers).cpu())
+        if symmetric:
+            pr = lg.softmax(-1)
+            pr = 0.5 * (pr + pr.flip(-1))
+            cls = torch.bucketize(torch.nan_to_num(zz), edges_t, right=True)
+            ce_sym = -torch.log(pr.gather(-1, cls[..., None])[..., 0].clamp(min=1e-12))
+            out["ce_sym"].append(torch.where(torch.isfinite(zz), ce_sym, torch.nan).cpu())
     model.train()
     return {k: torch.cat(v).numpy() for k, v in out.items()}
 
