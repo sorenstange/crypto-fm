@@ -1,0 +1,43 @@
+# Backbone v1 (plan.md §7, §9). Data/target definitions live in configs/data.yaml.
+
+model:
+  d_model: 256
+  n_layers: 6
+  n_heads: 4                 # head_dim 64
+  mlp_hidden: 768            # SwiGLU
+  dropout: 0.1
+  rope_base: 10000.0
+
+data:
+  context_patches: 128       # 1,920 minutes
+  warmup_patches: 96         # 1,440 minutes of segment history before a window may start
+  symbol_weight_power: 0.5   # symbol sampling mass ~ (number of train windows)^power
+  feature_dtype: float16     # features live on the GPU (~16 GB for train + val)
+  build_workers: 8
+
+loss:
+  w_vol: 1.0
+  z_loss: 1.0e-4
+
+train:
+  seed: 0
+  lr: 1.0e-3
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+  weight_decay: 0.1          # not on norms, biases or the patch embedding
+  warmup_steps: 1000
+  total_steps: 20000
+  decay_frac: 0.2            # WSD: linear decay over the last 20%
+  batch_size: 256
+  grad_clip: 1.0
+  precision: bf16            # bf16 | fp16 (V100) | fp32
+  compile: true
+  log_every: 50
+  eval_every: 500
+  eval_windows: 2048         # fixed random subset of the validation windows for periodic eval
+  early_stop_evals: 10       # stop after this many evals without a new best val loss
+  ckpt_every_minutes: 20
+
+eval:
+  stride: 64                 # validation windows overlap by context - stride patches
+  batch_size: 512
