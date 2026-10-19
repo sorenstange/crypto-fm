@@ -7,7 +7,8 @@ Every run must have `eval/val_points.npz` (`eval.save_points: true`). For each m
 (CE per return horizon, QLIKE per vol horizon, and the total val loss
 sum_h CE_h + w_vol sum_h QLIKE_h) the mean per run with a 95% day-block-bootstrap CI and
 the paired gain over the reference run (positive = better than the reference), on the
-points where every run's target is valid. Writes `compare.csv` next to the runs.
+points where every run's target is valid. Writes `--out` (default: `compare.csv` in the
+parent of the first run dir — pass `--out` when comparing across sweeps).
 """
 
 from __future__ import annotations
@@ -58,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("dirs", type=Path, nargs="+", help="run dirs, or one sweep dir containing them")
     p.add_argument("--ref", help="reference run (default: 'ref' if present, else the first)")
     p.add_argument("--w-vol", type=float, default=1.0)
+    p.add_argument("--out", type=Path, help="output csv (default: compare.csv in the parent of the first run)")
     args = p.parse_args(argv)
 
     dirs = args.dirs
@@ -70,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     steps = {d.name: json.loads((d / "eval" / "val_summary.json").read_text()) for d in dirs}
     table["best_step"] = table["run"].map(lambda n: steps[n].get("best_step"))
     table["last_step"] = table["run"].map(lambda n: steps[n].get("last_step"))
-    out = dirs[0].parent / "compare.csv"
+    out = args.out or dirs[0].parent / "compare.csv"
     table.to_csv(out, index=False)
     print(f"[compare] reference {ref}; gain = ref - run (positive = better than {ref}); {out}")
     print(table.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
