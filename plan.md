@@ -491,3 +491,16 @@ pnl_t = pos_t · r_{t→t+15}                         # log or simple return of 
    - Which storage location and quota should hold the data and checkpoints (the work/scratch path)?
    - Do compute nodes have outbound internet, or must downloads run on the login/transfer node?
    - Which CPU queue should CPU-only jobs use, and should LSF send email notifications (`#BSUB -B -N`)?
+
+### 15.1 Answers (2026-10-19)
+
+1. Universe: top ~50–100 USDT perps by liquidity, from 2020 onward, as planned.
+2. Costs: 0.05% taker + 0.02% slippage per unit turnover (c = 0.07%), plus the sensitivity sweep.
+3. Portfolio: equal-weight across tradable symbols (default); single-symbol results also reported.
+4. W&B: the logged-in account's default entity (`WANDB_ENTITY` left unset), project `crypto-fm`.
+5. Decision interval: fixed 15 minutes.
+6. DTU HPC:
+   - **Storage: the 30 GB home quota only** (no /work3 or blackhole). `DATA_ROOT = <project>/data`; the venv is `<project>/.venv`. Space is the binding constraint: delete zips and intermediates once verified, avoid caches in home, and monitor with `getquota_zhome.sh`.
+   - Internet on compute nodes: tested in M−1 (`jobs/check_net.sh`, `jobs/test_gpu.sh`).
+   - CPU queue: `hpc`; no LSF email notifications.
+   - Consequence: torch is the CUDA 13 build (smaller wheel), so `gpuv100` (no sm_70 support) is not a fallback; use `gpua100`, `gpul40s` or `gpuh100`.

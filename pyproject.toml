@@ -1,0 +1,9 @@
+[project]
+name = "cfm"
+version = "0.0.1"
+description = "Crypto OHLCV foundation model"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

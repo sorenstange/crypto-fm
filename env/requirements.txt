@@ -1,0 +1,21 @@
+# Pinned top-level requirements. The fully resolved set is written to
+# env/requirements.lock.txt by env/setup_env.sh.
+#
+# torch: CUDA 13.0 build; it bundles its own CUDA runtime (the GPU nodes run driver
+# 580). Chosen over cu126 because it is ~1/3 smaller (home quota is the only storage).
+# Supports A100/L40S/H100 but NOT V100 (CUDA 13 dropped sm_70), so no gpuv100 fallback.
+--extra-index-url https://download.pytorch.org/whl/cu130
+torch==2.14.1+cu130
+
+numpy==2.4.6
+pandas==3.0.6
+polars==1.44.2
+pyarrow==25.0.1
+scipy==1.17.1
+arch==8.0.0
+
+wandb==0.30.0
+pyyaml==6.0.3
+requests==2.34.2
+tqdm==4.70.1
+pytest==9.1.1
