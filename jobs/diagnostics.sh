@@ -1,7 +1,8 @@
 #!/bin/bash
 # M3 diagnostics of a finished backbone run (vol-scale vs. directional CE gain, zero returns,
 # reversal ICs) on all validation points:
-#     bsub < jobs/diagnostics.sh                  # run dir $RUNS_DIR/cfm_bb_v1, best.pt
+#     bsub < jobs/diagnostics.sh                       # run dir $RUNS_DIR/cfm_bb_v1, best.pt
+#     bsub -J cfm_diag_cfm_bb_v2 < jobs/diagnostics.sh # another run: job name cfm_diag_<run>
 #BSUB -q gpul40s
 #BSUB -J cfm_diag
 #BSUB -n 4
@@ -14,4 +15,6 @@
 
 set -euo pipefail
 source jobs/common.sh
-cfm_run python -m cfm.eval.diagnostics --run-dir "$RUNS_DIR/cfm_bb_v1"
+RUN=${LSB_JOBNAME#cfm_diag}
+RUN=${RUN#_}
+cfm_run python -m cfm.eval.diagnostics --run-dir "$RUNS_DIR/${RUN:-cfm_bb_v1}"
