@@ -2,7 +2,7 @@
 # The v1 return heads overfit after ~1,000 steps (best checkpoint at step 1000, h60 worst).
 #     bsub < jobs/sweep.sh        then   python -m cfm.eval.compare_runs $DATA_ROOT/runs/reg1
 name: reg1
-config: configs/backbone.yaml
+config: configs/backbone_v1.yaml
 tags: [regularisation]
 base:                              # applied to every run
   train.eval_every: 250

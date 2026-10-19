@@ -1,4 +1,6 @@
-# Backbone v1 (plan.md §7, §9). Data/target definitions live in configs/data.yaml.
+# Backbone v2 (plan.md §7, §9, §16): v1 + the regularisation sweep winner (reg2/flip_ep2):
+# lr 3e-4, return weights 1/1/0.5/0.25, sign-flip augmentation, 3,000-step WSD schedule with
+# decay over the last 50%. v1: configs/backbone_v1.yaml. Data/target definitions: configs/data.yaml.
 
 model:
   d_model: 256
@@ -19,30 +21,30 @@ data:
 loss:
   w_vol: 1.0
   z_loss: 1.0e-4
-  ret_weights: [1.0, 1.0, 1.0, 1.0]   # per return horizon (h1, h5, h15, h60) in the training loss
+  ret_weights: [1.0, 1.0, 0.5, 0.25]  # per return horizon (h1, h5, h15, h60) in the training loss
   hl_gauss_sigma: 0.0        # > 0: HL-Gauss soft CE targets with this sigma (z units; bin width 0.156)
 
 train:
   seed: 0
-  lr: 1.0e-3
+  lr: 3.0e-4
   betas: [0.9, 0.95]
   eps: 1.0e-8
   weight_decay: 0.1          # not on norms, biases or the patch embedding
-  warmup_steps: 1000
-  total_steps: 20000
-  decay_frac: 0.2            # WSD: linear decay over the last 20%
+  warmup_steps: 300
+  total_steps: 3000           # ~2 passes over the train patches per mirrored version; onset of overfitting ~3,000
+  decay_frac: 0.5            # WSD: linear decay over the last 50%
   batch_size: 256
   grad_clip: 1.0
-  flip_prob: 0.0             # sign-flip augmentation: probability of mirroring a train window (cfm.data.augment)
+  flip_prob: 0.5             # sign-flip augmentation: probability of mirroring a train window (cfm.data.augment)
   precision: bf16            # bf16 | fp16 (V100) | fp32
   compile: true
   log_every: 50
-  eval_every: 500
+  eval_every: 250
   eval_windows: 2048         # fixed random subset of the validation windows for periodic eval
-  early_stop_evals: 10       # stop after this many evals without a new best val loss
+  early_stop_evals: 12       # stop after this many evals without a new best val loss
   ckpt_every_minutes: 20
 
 eval:
   stride: 64                 # validation windows overlap by context - stride patches
   batch_size: 512
-  save_points: false         # save per-point val losses (eval/val_points.npz) for cfm.eval.compare_runs
+  save_points: true          # save per-point val losses (eval/val_points.npz) for cfm.eval.compare_runs

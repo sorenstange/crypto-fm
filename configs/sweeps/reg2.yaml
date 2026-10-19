@@ -6,7 +6,7 @@
 #     bsub -J "cfm_reg2[1-2]" < jobs/sweep.sh
 #     python -m cfm.eval.compare_runs data/runs/reg1/ref data/runs/reg1/lr3e4 data/runs/reg1/retw data/runs/reg2/*
 name: reg2
-config: configs/backbone.yaml
+config: configs/backbone_v1.yaml
 tags: [regularisation]
 base:
   train.lr: 3.0e-4

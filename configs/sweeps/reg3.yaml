@@ -6,7 +6,7 @@
 #     python -m cfm.eval.compare_runs data/runs/reg1/ref data/runs/reg2/flip_ep2 data/runs/reg3/* \
 #         --ref flip_ep2 --out data/runs/reg3/compare.csv
 name: reg3
-config: configs/backbone.yaml
+config: configs/backbone_v1.yaml
 tags: [regularisation]
 base:
   train.lr: 3.0e-4
