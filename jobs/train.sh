@@ -10,7 +10,7 @@
 #BSUB -R "span[hosts=1]"
 #BSUB -R "rusage[mem=16GB]"
 #BSUB -gpu "num=1:mode=exclusive_process"
-#BSUB -W 8:00
+#BSUB -W 2:00
 #BSUB -wa USR2
 #BSUB -wt 15
 #BSUB -o logs/%J.out
