@@ -17,17 +17,37 @@ def bins_of(z: torch.Tensor, edges: torch.Tensor) -> torch.Tensor:
     return torch.bucketize(z, edges, right=True)
 
 
-def return_losses(logits: torch.Tensor, z: torch.Tensor, edges: torch.Tensor, mask: torch.Tensor
-                  ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """logits [N, H, K], z [N, H], mask [N] -> (CE per horizon [H], z-loss, CE per point [N, H]).
+def soft_targets(z: torch.Tensor, edges: torch.Tensor, sigma: float) -> torch.Tensor:
+    """HL-Gauss-style targets -> [..., E + 1]: N(c, sigma^2) integrated over the bins (tails
+    included), centred on the centre c of z's hard bin rather than on z itself. Exact-zero
+    returns (~10% at h1) lie on the edge at 0; centring on z would split them 50/50 between
+    two bins while the hard CE used for evaluation puts them in the upper one."""
+    w = edges[1] - edges[0]
+    centers = torch.cat([edges[:1] - w / 2, (edges[:-1] + edges[1:]) / 2, edges[-1:] + w / 2])
+    c = centers[bins_of(z, edges)]
+    cdf = torch.special.ndtr((edges - c[..., None]) / sigma)
+    zeros, ones = torch.zeros_like(cdf[..., :1]), torch.ones_like(cdf[..., :1])
+    return torch.cat([zeros, cdf, ones], dim=-1).diff(dim=-1)
 
-    Invalid targets (NaN z or mask False) get CE NaN in the per-point output."""
+
+def return_losses(logits: torch.Tensor, z: torch.Tensor, edges: torch.Tensor, mask: torch.Tensor,
+                  soft_sigma: float = 0.0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """logits [N, H, K], z [N, H], mask [N] -> (loss per horizon [H], z-loss, hard CE per point [N, H]).
+
+    The loss per horizon is the mean hard CE, or with `soft_sigma` > 0 the mean CE against
+    HL-Gauss soft targets (a training regulariser). Invalid targets (NaN z or mask False)
+    get CE NaN in the per-point output."""
     logits = logits.float()
     valid = torch.isfinite(z) & mask[:, None]
     cls = bins_of(torch.nan_to_num(z), edges)
     ce = F.cross_entropy(logits.permute(0, 2, 1), cls, reduction="none")          # [N, H]
     w = valid.float()
-    ce_h = (ce * w).sum(0) / w.sum(0).clamp(min=1)
+    if soft_sigma > 0:
+        soft = soft_targets(torch.nan_to_num(z), edges, soft_sigma)
+        obj = -(soft * torch.log_softmax(logits, dim=-1)).sum(-1)
+    else:
+        obj = ce
+    ce_h = (obj * w).sum(0) / w.sum(0).clamp(min=1)
     lse = torch.logsumexp(logits, dim=-1)
     zl = ((lse**2) * w).sum() / w.sum().clamp(min=1)
     return ce_h, zl, torch.where(valid, ce, torch.nan)

@@ -1,0 +1,20 @@
+# Regularisation sweep, round 1 (plan.md §16): one change at a time against the reference.
+# The v1 return heads overfit after ~1,000 steps (best checkpoint at step 1000, h60 worst).
+#     bsub < jobs/sweep.sh        then   python -m cfm.eval.compare_runs $DATA_ROOT/runs/reg1
+name: reg1
+config: configs/backbone.yaml
+tags: [regularisation]
+base:                              # applied to every run
+  train.eval_every: 250
+  train.early_stop_evals: 12       # 3,000 steps without a new best
+  eval.save_points: true
+runs:
+  ref: {}
+  drop02: {model.dropout: 0.2}
+  drop03: {model.dropout: 0.3}
+  wd03: {train.weight_decay: 0.3}
+  lr3e4: {train.lr: 3.0e-4}
+  hlgauss: {loss.hl_gauss_sigma: 0.117}            # 0.75 bin widths
+  retw: {loss.ret_weights: [1.0, 1.0, 0.5, 0.25]}  # h1, h5, h15, h60
+  nocal: {model.drop_features: [mod_sin, mod_cos, dow_sin, dow_cos]}
+  short: {train.total_steps: 4000, train.warmup_steps: 500}

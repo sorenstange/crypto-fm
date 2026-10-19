@@ -521,3 +521,21 @@ pnl_t = pos_t · r_{t→t+15}                         # log or simple return of 
 - **σ floor** is causal and adaptive, `σ ≥ max(0.2 · slow-EWMA σ (half-life 7 days), 1e-6)`, instead of a train-only 5th percentile, which does not exist for symbols listed after the train period.
 - **Normaliser** for candle t is `σ_{t−1} · sqrt(season_t)` (deseasonalised EWMA re-seasonalised with the calendar factor known in advance); use the same scale for return targets in Phase 4.
 - Patch-anchored normalisation (§4.4) is left to the Phase 3 dataset.
+
+---
+
+## 16. Pre-M4: regularisation of the return heads (added 2026-10-19, session 3)
+
+**Problem (M3 run `cfm_bb_v1`):** the best validation loss came at step 1,000 (still in warm-up); afterwards train CE keeps falling while validation CE rises, most for long horizons (h60 gain 0.10 → −0.05). The vol heads do not overfit, but the overfitting return heads force an early checkpoint and hurt the shared backbone (with shuffled return targets the vol head beats HAR by 0.041 / 0.024 instead of 0.033 / 0.017). Suspected mechanism: memorisation of market-wide moves (one time point's outcome is shared by ~300 correlated symbols and by 4 overlapping h60 targets; timestamps are identifiable from time encodings and context).
+
+**Infrastructure:** `cfm.train --set key=value` overrides; `loss.ret_weights` (per return horizon), `loss.hl_gauss_sigma` (Gaussian label smoothing over the bins, centred on the hard bin), `model.drop_features`; `cfm.sweep` trains several configurations on one data build (`configs/sweeps/*.yaml`, `jobs/sweep.sh`); `eval.save_points` + `cfm.eval.compare_runs` give paired day-bootstrap CIs between runs on identical validation points.
+
+**Round 1 (`configs/sweeps/reg1.yaml`), one change at a time,** eval every 250 steps, early stop after 12 evals: reference; dropout 0.2 / 0.3; weight decay 0.3; LR 3e-4; HL-Gauss σ = 0.75 bin widths; return weights 1/1/0.5/0.25; no calendar features (mechanism probe); short schedule (4,000 steps, warm-up 500, decay over the last 20%).
+
+**Round 2:** combine the 2–3 helpful changes; repeat the winner with a second seed; one full run `cfm_bb_v2` with the usual final evaluation.
+
+**Selection:** primary = validation loss (Σ CE + Σ QLIKE) of each run's best checkpoint on all validation points, paired CI vs the reference; secondary = step of the best checkpoint, h60 CE degradation after it, QLIKE vs HAR, train–val CE gap. Within CIs prefer the simpler config.
+
+**Deferred:** market-relative (cross-sectionally de-meaned) return targets — attack the mechanism directly but change the task (market-neutral policy in M7); only if round 1 does not fix the overfitting.
+
+**Afterwards (before M4):** stronger yardsticks — HAR-rescaled marginal as the return baseline and reversal signals as IC baselines.

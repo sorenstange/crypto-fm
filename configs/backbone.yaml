@@ -7,6 +7,7 @@ model:
   mlp_hidden: 768            # SwiGLU
   dropout: 0.1
   rope_base: 10000.0
+  drop_features: []          # input features zeroed (ablations), names from cfm.data.features.FEATURES
 
 data:
   context_patches: 128       # 1,920 minutes
@@ -18,6 +19,8 @@ data:
 loss:
   w_vol: 1.0
   z_loss: 1.0e-4
+  ret_weights: [1.0, 1.0, 1.0, 1.0]   # per return horizon (h1, h5, h15, h60) in the training loss
+  hl_gauss_sigma: 0.0        # > 0: HL-Gauss soft CE targets with this sigma (z units; bin width 0.156)
 
 train:
   seed: 0
@@ -41,3 +44,4 @@ train:
 eval:
   stride: 64                 # validation windows overlap by context - stride patches
   batch_size: 512
+  save_points: false         # save per-point val losses (eval/val_points.npz) for cfm.eval.compare_runs
