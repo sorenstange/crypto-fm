@@ -29,6 +29,12 @@ def capture_rng_state() -> dict[str, Any]:
     return state
 
 
+def seed_all(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+
 def restore_rng_state(state: dict[str, Any]) -> None:
     # RNG states must be CPU ByteTensors, whatever map_location the checkpoint used.
     random.setstate(state["python"])

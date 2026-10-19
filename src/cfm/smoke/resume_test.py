@@ -37,7 +37,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from cfm.utils.checkpoint import (capture_rng_state, latest_checkpoint, load_checkpoint,
-                                  restore_rng_state, save_checkpoint)
+                                  restore_rng_state, save_checkpoint, seed_all)
 from cfm.utils.run import COMPLETED_FILE, GracefulStop, collect_run_info, init_wandb, write_run_info
 
 
@@ -57,12 +57,6 @@ class Config:
     log_every: int = 10
     ckpt_every: int = 100
     step_sleep: float = 0.0  # seconds per step; stretches the run so LSF signals land mid-run
-
-
-def seed_all(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
 
 
 def wsd_lambda(cfg: Config):
