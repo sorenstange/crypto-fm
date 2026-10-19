@@ -397,6 +397,15 @@ logging: wandb (see 1.2); one W&B run per training run, resumed across chained j
 - Plot best validation loss against parameters and against data. Optionally fit `L(N, D) = E + A/N^α + B/D^β`.
 - **Choose the smallest model near the plateau.** Expect saturation in the single-digit millions of parameters.
 
+### 10.1 Implementation decisions (2026-10-19, session 3, after the §16 regularisation sweeps)
+
+1. **Data fractions by time, not by symbol:** a 25% / 50% subset is a random subset of whole training days (all symbols kept), applied by masking which windows may start on which days, so one data build serves all runs. Reason: the effective information is in distinct time points (~175k 15-min points in train, ~140 correlated symbols each), not in more coins at the same timestamp. A symbol-subsampling variant (cross-sectional breadth) is an optional extra.
+2. **Schedule length scales with the data fraction:** each run gets a schedule of ~2 passes over its own data (with sign-flip augmentation), with the LR decay finishing before the overfitting onset (§16 round 2), instead of a fixed step count; otherwise the small-data runs mostly measure overfitting. Early stopping stays on.
+3. **Learning rate per size:** a short LR check at the extremes (XS and XL, e.g. {1e-4, 3e-4, 1e-3}) so that a large model does not look bad only because of a wrong LR; interpolate for the sizes in between.
+4. **Report returns and volatility separately** (CE per horizon, QLIKE per horizon) as well as the total validation loss; they may scale differently (vol probably saturates early, returns stay data-limited).
+5. **Infrastructure:** reuse `cfm.sweep` (one data build per job, runs split over array elements) and `cfm.eval.compare_runs` (paired CIs on identical validation points). ~15–20 runs at 5–15 min each, ~3–4 GPU-hours.
+6. **Reading the result:** larger models flat, more data helps → data-limited: keep the model small and run the §17 data experiments (the 50% → 100% step is their gate); both flat → noise floor for this setup, improve features / targets / task instead; larger models help → scale up.
+
 ---
 
 ## 11. Phase 9 — Evaluation
