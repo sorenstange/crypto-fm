@@ -27,12 +27,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yaml
 
 from cfm.data import binance as bn
 from cfm.data.convert import clean_klines, encode_funding, encode_klines, write_parquet_atomic
-from cfm.data.load import funding_path, kline_path, raw_dir
+from cfm.data.load import funding_path, kline_path, raw_dir, read_funding, read_klines
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MANIFEST_COLUMNS = ["symbol", "data_type", "period", "url", "sha256", "status", "attempts",
@@ -165,6 +166,57 @@ def process_symbol(symbol: str, root: Path, end: str, workers: int) -> dict:
     return summary
 
 
+REST_FUNDING = "https://fapi.binance.com/fapi/v1/fundingRate"
+
+
+def backfill_funding(symbol: str, root: Path, min_late_hours: float = 24.0) -> dict:
+    """Fill funding history the bucket lacks (e.g. before a delist/relist) from the REST API.
+
+    Only the stretch between the first kline and the first bucket funding row is fetched;
+    the interval of each REST row is inferred from the spacing to the next settlement.
+    Appends a `funding_rest` row to the symbol's manifest.
+    """
+    first_kline = read_klines(symbol, columns=["ts"], root=root)["ts"].iloc[0]
+    have = read_funding(symbol, root)
+    first_funding = have["funding_time"].iloc[0]
+    late_h = (first_funding - first_kline) / pd.Timedelta(hours=1)
+    if late_h <= min_late_hours:
+        return {"symbol": symbol, "late_hours": late_h, "added": 0}
+    start, end = int(first_kline.timestamp() * 1000), int(first_funding.timestamp() * 1000) - 1
+    rows = []
+    while start <= end:
+        r = bn.session().get(REST_FUNDING, params={"symbol": symbol, "startTime": start,
+                                                   "endTime": end, "limit": 1000}, timeout=30)
+        r.raise_for_status()
+        batch = r.json()
+        if not batch:
+            break
+        rows += batch
+        start = batch[-1]["fundingTime"] + 1
+        time.sleep(0.5)   # fundingRate shares a 500 requests / 5 min / IP limit
+    if not rows:
+        return {"symbol": symbol, "late_hours": late_h, "added": 0}
+    rest = pd.DataFrame({"calc_time": [int(x["fundingTime"]) for x in rows],
+                         "last_funding_rate": [float(x["fundingRate"]) for x in rows]})
+    t = rest["calc_time"].to_numpy()
+    nxt = np.append(t[1:], int(first_funding.timestamp() * 1000))
+    rest["funding_interval_hours"] = np.rint((nxt - t) / 3_600_000).clip(1, 8).astype(int)
+    old = have.assign(calc_time=have["funding_time"].map(lambda x: x.value // 10**6),
+                      last_funding_rate=have["funding_rate"])
+    merged = pd.concat([rest, old[["calc_time", "funding_interval_hours", "last_funding_rate"]]],
+                       ignore_index=True)
+    write_parquet_atomic(encode_funding(merged), funding_path(symbol, root), delta=False)
+    mp = manifest_path(symbol, root)
+    m = pd.read_csv(mp)
+    m = m[m["data_type"] != "funding_rest"]
+    period = f"{pd.Timestamp(t[0], unit='ms'):%Y-%m-%d}..{pd.Timestamp(t[-1], unit='ms'):%Y-%m-%d}"
+    extra = pd.DataFrame([{"symbol": symbol, "data_type": "funding_rest", "period": period,
+                           "url": REST_FUNDING, "status": "ok", "attempts": 1, "rows": len(rest),
+                           "first_ts": int(t[0]), "last_ts": int(t[-1])}])
+    pd.concat([m, extra], ignore_index=True).to_csv(mp, index=False)
+    return {"symbol": symbol, "late_hours": late_h, "added": len(rest), "period": period}
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = p.add_mutually_exclusive_group(required=True)
@@ -175,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--root", type=Path, default=None, help="default $DATA_ROOT/raw")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--backfill-funding", action="store_true",
+                   help="only fill missing early funding history from the REST API")
     args = p.parse_args(argv)
 
     root = args.root or raw_dir()
@@ -183,6 +237,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         universe = universe_symbols()
         symbols = [universe[i - 1] for i in args.index if i <= len(universe)]
+    if args.backfill_funding:
+        for s in symbols:
+            print(f"[download] backfill {backfill_funding(s, root)}", flush=True)
+        return 0
     failed = 0
     for s in symbols:
         if not args.force and is_done(s, root):
