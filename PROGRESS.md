@@ -12,7 +12,7 @@ M−1 evidence:
 
 ## Next steps (M0, plan.md §2)
 1. ~~Explore the bucket~~ — DONE 2026-10-19 (session 2), findings below under "Binance bucket facts".
-2. `src/cfm/data/universe.py`: list all `*USDT` perps incl. delisted, apply §2.2 exclusions, rank by median daily quote volume (1d klines), ≥12 months history. **Show the symbol list to the user for review** before the full download.
+2. `src/cfm/data/universe.py` — scan DONE (job 29754392, 11 min; `select` re-run on login node after a YAML numpy-float fix). 567 eligible symbols (145 not trading now), ~874M est. candles, 27.2 GB of 1m zips; ranked list in `configs/universe.yaml`, raw scan in `data/raw/universe/`. **Waiting for the user: liquidity floor / candle budget and whether to drop the quote-volume columns** (see Storage budget).
 3. Pilot: `download.py` + `jobs/download.sh` (CPU queue `hpc`; compute nodes have internet) for BTCUSDT/ETHUSDT, 2 months; checksum-verified, manifest written.
 4. **Storage budget** from the pilot sizes: extrapolate zips + parquet for the full universe against the free quota (~19 GB) before the full download. Delete zips once converted + verified (keep manifest with sha256).
 5. Full download (job array per symbol), `convert.py`, `validate.py`, REST spot-checks → M0 acceptance. Then stop and report.
@@ -32,7 +32,7 @@ M−1 evidence:
 ## Binance bucket facts (explored 2026-10-19, session 2)
 - **Listing:** `https://s3-ap-northeast-1.amazonaws.com/data.binance.vision?prefix=...&delimiter=/&marker=...`, 1000 entries/page, continue with `NextMarker` (or last `<Key>` when no delimiter). **Parse the XML properly** — newer `<Contents>` entries carry extra `<ChecksumAlgorithm>/<ChecksumType>` elements; a naive Key…ETag…Size regex silently dropped everything after 2025-01.
 - futures/um monthly types: aggTrades, bookTicker, fundingRate, indexPriceKlines, klines, markPriceKlines, premiumIndexKlines, trades. Daily additionally: bookDepth, metrics.
-- **Symbols (monthly/klines): 1056** = 900 `*USDT`, 52 dated (`_YYMMDD`), 40 `*USDC`, 41 `*BUSD`, plus odd ones: `ETHBTC`, `BTCU`/`ETHU`, `*USD1`, and 19 `*USDTSETTLED` / `*USDT_SETTLED` (even `AERGOUSDTSETTLEDSETTLED`). All 900 USDT symbols have a fundingRate dir.
+- **Symbols (monthly/klines): 1056** = 900 `*USDT`, 52 dated (`_YYMMDD`), 40 `*USDC`, 41 `*BUSD`, plus odd ones: `ETHBTC`, `BTCU`/`ETHU`, `*USD1`, and 17 `*USDTSETTLED` / `*USDT_SETTLED` (even `AERGOUSDTSETTLEDSETTLED`). All 900 USDT symbols have a fundingRate dir.
   - `*SETTLED` = copies/fragments of a contract around a settlement/delist-relist (ICPUSDT_SETTLED duplicates ICPUSDT 2022; BNXUSDTSETTLED = old pre-2023-02-22 BNX contract at ~100 USDT, while BNXUSDT relisted redenominated at ~1.4 and ends the old stretch with flat zero-volume candles). → **exclude `*SETTLED`**; the main symbol's long gaps / price jumps are handled by Phase-1 segment splitting.
   - Index/basket: `BTCDOMUSDT`, `DEFIUSDT`, `BLUEBIRDUSDT`, `FOOTBALLUSDT`. Stable/commodity: `USDCUSDT`, `PAXGUSDT`, `XAUTUSDT` (exclude). `BUSDT`/`TUSDT` are regular tokens (B, T), not stablecoins.
 - **Coverage:** BTCUSDT 1m monthly 2020-01 … 2026-09 (81 files, 152 MB zipped, ~1.9 MB/month); daily files cover the current month up to yesterday (2026-10-18). premiumIndex/markPrice klines from 2020-01; daily `metrics` from 2020-09.
@@ -41,6 +41,13 @@ M−1 evidence:
 - **fundingRate CSV:** header `calc_time,funding_interval_hours,last_funding_rate`; `calc_time` in ms with **0–20 ms jitter** (e.g. …800005) → round to the nearest minute. Interval stored per row: 8h (BTC, DOGE, PEPE), 4h (WIF, TRUMP), 1h (ALPACA 2025-06). No mark price column.
 - 1d klines exist per symbol/month (`klines/{S}/1d/`, ~4 KB each) for the volume ranking; a listing request takes ~1.5 s.
 - Rough size: 100M candles ≈ 2,300 symbol-months ≈ ≤ 4.4 GB of zips at BTC's per-month size (alts likely smaller).
+
+## Storage budget (M0 step 2, 2026-10-19)
+- User wants **as many candles as fit**, leaving headroom for models and other tasks (not just ≥100M).
+- Parquet bytes/candle measured on 1-month samples: float64 + zstd ≈ 43–50 B; **lossless int encoding** (prices as int ticks, volumes as int lots, DELTA_BINARY_PACKED + zstd) ≈ 26 B; same without `quote_volume`/`taker_buy_quote` ≈ 15 B (those two are ~half the bytes; ≈ volume×price).
+- Free ≈ 19 GB. Proposed reserve ≈ 8.5 GB (checkpoints 3, W&B/logs/eval 1, stats/indices 1, in-flight zips 1.5, safety 2) → **~10.5 GB for raw klines**. Assumes Phase 1/2 don't materialise a second full copy (cleaning → segment index; features computed in RAM at load time or stored compactly).
+- Floors (median daily quote volume): ≥$5M → 348 symbols, ~648M candles, ~9.7 GB @15 B; ≥$10M → 218 / 476M; ≥$2M → 482 / 781M / 11.7 GB.
+- venv is 9.9 GB (nvidia 4.2, torch 2.1, triton 1.2); not touched.
 
 ## Running / pending jobs
 - None (`bjobs` empty at session end, 2026-10-19).
