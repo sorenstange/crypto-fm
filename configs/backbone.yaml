@@ -13,7 +13,7 @@ data:
   warmup_patches: 96         # 1,440 minutes of segment history before a window may start
   symbol_weight_power: 0.5   # symbol sampling mass ~ (number of train windows)^power
   feature_dtype: float16     # features live on the GPU (~16 GB for train + val)
-  build_workers: 8
+  build_workers: 4          # = cores requested in jobs/train.sh
 
 loss:
   w_vol: 1.0
