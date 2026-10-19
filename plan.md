@@ -539,3 +539,18 @@ pnl_t = pos_t · r_{t→t+15}                         # log or simple return of 
 **Deferred:** market-relative (cross-sectionally de-meaned) return targets — attack the mechanism directly but change the task (market-neutral policy in M7); only if round 1 does not fix the overfitting.
 
 **Afterwards (before M4):** stronger yardsticks — HAR-rescaled marginal as the return baseline and reversal signals as IC baselines.
+
+---
+
+## 17. Candidate experiments after M4: more and cross-market data (added 2026-10-19, session 3)
+
+Motivation: the backbone is data-limited (overfitting after ~1 pass over the train patches; sign-flip augmentation, which roughly doubles the effective data, doubled the onset and gave the largest gain in §16). **Gate:** run these only if the M4 data axis (25 / 50 / 100% of the train data) shows validation loss still clearly improving from 50% to 100%; if the curve is flat, more data will not help either. Always evaluate on the crypto validation set, paired against the same model without the extra data (`cfm.eval.compare_runs`).
+
+In order of cost:
+
+1. **Lower the universe floor** from $5M to $2M median daily quote volume (§15.2: ~482 symbols, ~781M candles, ≈ +20% candles, ~1.5 GB more raw data). Same domain and pipeline; check the quota first. Note: more coins add little new information about market-wide moves at the same timestamps (the suspected memorisation route), so the gain may be smaller than the candle count suggests.
+2. **FX as auxiliary pretraining data.** Free 1-minute FX history exists (e.g. HistData, Dukascopy — check terms of use). ~20 pairs × 10 years ≈ 75M candles ≈ 1 GB. Crypto-specific features that FX lacks (real volume, taker imbalance, trade count, funding) are masked (`model.drop_features`-style per-sample masks plus a domain flag), and the 24/5 schedule and weekend gaps go through Phase-1 segmenting. Compare: pretrain crypto + FX vs crypto only; optionally fine-tune on crypto afterwards.
+3. **Stocks** only if FX helps and a usable 1-minute source is available (free long histories are rare; most are paid or limited). Trading hours, overnight gaps and auctions need their own segmenting and seasonality.
+4. **Macro event calendar feature** (independent of 1–3, mainly for the vol head / M5): scheduled US releases (CPI, FOMC, NFP, …) are known in advance, so "minutes to / since the next / last scheduled event" is causal. Crypto volatility spikes at these times and the model cannot see them coming now. Needs a historical release-time calendar for 2020–2026 (verify the source and its timestamps).
+
+Not planned: real-time cross-asset features (index futures, DXY, VIX) at 1-minute resolution — lead-lag effects at these horizons are small, and the data is expensive.
