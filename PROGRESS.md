@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated: 2026-10-19, session 3. M3 criteria met by `cfm_bb_v1` (job 29758436) — **M3 ACCEPTED by the user** (no leak; gain mostly volatility/tick size, direction ≈ short-term reversal). Next: regularisation fix for the overfitting return heads (planning), then stronger baselines, then M4. No jobs running. Commits not pushed (no GitHub credentials on the cluster yet)._
+_Last updated: 2026-10-19, session 3. M3 criteria met by `cfm_bb_v1` (job 29758436) — **M3 ACCEPTED by the user** (no leak; gain mostly volatility/tick size, direction ≈ short-term reversal). Next: regularisation fix (plan.md §16) — infrastructure done (fd9e221), **round-1 sweep `reg1` submitted as array 29758785** (gpul40s); then stronger baselines, then M4. Commits not pushed (no GitHub credentials on the cluster yet)._
 
 ## Current milestone
 **M3 (backbone v1) — DONE, accepted 2026-10-19 (session 3)** with the caveats below. Pre-M4 work: (1) regularisation fix, (2) stronger yardsticks (HAR-rescaled marginal, reversal IC baselines). All code is written, committed, unit-tested and smoke-tested on an L40S. Full run `cfm_bb_v1` (job 29758436) **meets the M3 criteria** (below); reported to the user, not yet accepted.
@@ -65,7 +65,7 @@ M−1 evidence:
 ## Next steps (M3)
 1. ~~Diagnostics~~ **done** (see above). Was: (the CE gains / h1 IC look large for this SNR): (a) a "HAR-scaled marginal" return baseline — marginal shape rescaled by sqrt(HAR/EWMA variance) — to separate the volatility-scale part of the CE gain; (b) the IC of a trivial 1-minute reversal signal (−last return) to see how much of the h1 IC is bid-ask bounce; (c) a shuffled-target control (permute targets across windows → gain must vanish); (d) a one-patch feature-lag control (input ends one patch before the prediction point → gain should shrink, not collapse); also check the share of the zero-return bin per symbol (tick-size discreteness on low-priced coins).
 2. Full run done (job 29758436): all M3 criteria met; **M3 accepted by the user**. Proposed for later milestones: HAR-rescaled marginal as the return baseline and reversal signals as IC baselines (vs marginal is a weak bar).
-3. Overfitting of the return heads (best at step 1000, during warm-up): options to discuss — eval every 100–250 steps, stronger regularisation (dropout, weight decay), lower LR, fewer/shorter-overlap targets, removing absolute-time cues, or a data-fraction check in the M4 ladder. Do not start M4 before this is decided.
+3. **Regularisation fix (plan.md §16, user-approved 2026-10-19).** Infrastructure (fd9e221): `cfm.train --set`, `loss.ret_weights`, `loss.hl_gauss_sigma` (soft targets centred on the *hard bin's centre* — centring on z would split the 10% exact-zero h1 returns 50/50 across the edge at 0 while evaluation puts them in the upper bin), `model.drop_features` (input mask, not in state_dict), `cfm.sweep` (one data build, runs round-robin over array parts, checkpoints deleted after each run), `eval.save_points` + `cfm.eval.compare_runs` (paired day-bootstrap vs the reference). CPU smoke (`jobs/sweep_smoke.sh`, job 29758780) passed. **Round 1 = array 29758785 (`jobs/sweep.sh`, `configs/sweeps/reg1.yaml`: ref, drop02, drop03, wd03, lr3e4, hlgauss, retw, nocal, short; part 1 = ref/drop03/lr3e4/retw/short, part 2 = drop02/wd03/hlgauss/nocal).** When done: `python -m cfm.eval.compare_runs data/runs/reg1` → pick 2–3 helpful changes for round 2 (combine + second seed), then a full `cfm_bb_v2` run. Do not start M4 before this is decided.
 4. Clean-up: `data/runs/smoke_m3` deleted (session 3); W&B smoke runs `afa7d897` (and the failed attempts) can be deleted if the user wants.
 5. Push: needs GitHub credentials on the cluster (no gh, no SSH key, no credential helper) — user to choose a PAT push via `! git push https://sorenstange@github.com/...` or an SSH key for the cluster.
 6. Later: consider dropping the `filled` feature (always 0).
@@ -108,7 +108,8 @@ M−1 evidence:
 - Pilot bytes/candle (int store, full history): BTC 14.4, ETH 13.2, LUNA 11.8, HYPER 9.3; full universe 10.3.
 
 ## Running / pending jobs
-- None. (29758436 `cfm_bb_v1` finished DONE, COMPLETED at step 6000.)
+- **29758785[1-2]** `cfm_reg1` on gpul40s (2 h walltime; resubmit `bsub < jobs/sweep.sh` if interrupted — COMPLETED runs are skipped) → `data/runs/reg1/<run>/eval/`, W&B group `reg1`.
+- 29758786 `cfm_tests` (hpc): full pytest after the refactor.
 
 ## Code map (what exists)
 - `env/setup_env.sh`, `env/modules.sh`, `env/requirements.txt` (+ `requirements.lock.txt`)
