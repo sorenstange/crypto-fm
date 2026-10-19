@@ -1,0 +1,23 @@
+# Regularisation sweep, round 3 (plan.md §16): reg2's winner flip_ep2 (lr 3e-4, return weights
+# 1/1/0.5/0.25, sign-flip p 0.5, 3,000 steps with decay over the last 50%) peaked at its last
+# step -> bracket the schedule length, and repeat it with a second seed. Compare against
+# reg1/ref and reg2/flip_ep2:
+#     bsub -J "cfm_reg3[1-2]" < jobs/sweep.sh
+#     python -m cfm.eval.compare_runs data/runs/reg1/ref data/runs/reg2/flip_ep2 data/runs/reg3/* \
+#         --ref flip_ep2 --out data/runs/reg3/compare.csv
+name: reg3
+config: configs/backbone.yaml
+tags: [regularisation]
+base:
+  train.lr: 3.0e-4
+  loss.ret_weights: [1.0, 1.0, 0.5, 0.25]
+  train.flip_prob: 0.5
+  train.warmup_steps: 300
+  train.decay_frac: 0.5
+  train.eval_every: 250
+  train.early_stop_evals: 12
+  eval.save_points: true
+runs:
+  s1_3k: {train.total_steps: 3000, train.seed: 1}
+  t4k: {train.total_steps: 4000}
+  t5k: {train.total_steps: 5000}
